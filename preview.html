@@ -1,0 +1,487 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Accordion Tutor Preview</title>
+    <style>
+      :root { color: #1f2623; background: #f7f6f2; font-family: Inter, system-ui, sans-serif; }
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 16px; }
+      button, .file-picker { border: 1px solid #2f5f65; background: #fff; color: #15383d; border-radius: 6px; min-height: 38px; padding: 0 12px; font: inherit; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; }
+      button:hover, .file-picker:hover { background: #e8f5f3; }
+      button:disabled { cursor: not-allowed; opacity: .42; }
+      input[type=file] { display: none; }
+      .upload-panel, .beat-navigator, .score-viewer, .beat-info { border: 1px solid #d8d8cf; background: #fffefb; border-radius: 8px; }
+      .upload-panel { display: flex; justify-content: space-between; gap: 14px; padding: 14px 16px; align-items: center; }
+      h1 { margin: 0 0 4px; font-size: 24px; letter-spacing: 0; }
+      p { margin: 0; color: #59625d; }
+      .upload-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+      .beat-navigator { display: grid; grid-template-columns: 118px minmax(180px, 1fr) 118px; gap: 12px; align-items: center; margin-top: 12px; padding: 10px; }
+      .beat-position { display: flex; justify-content: center; align-items: baseline; gap: 12px; }
+      .beat-position strong { font-size: 19px; }
+      .workspace-grid { display: grid; grid-template-columns: minmax(250px, .8fr) minmax(470px, 1.15fr) minmax(230px, .6fr); gap: 14px; margin-top: 14px; align-items: start; }
+      .score-viewer, .beat-info { padding: 12px; }
+      .score-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 10px; }
+      .score-header h2, .beat-info h2 { margin: 0; font-size: 18px; }
+      .beat-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 7px; max-height: 540px; overflow: auto; }
+      .beat-strip button { min-height: 34px; padding: 0 8px; }
+      .beat-strip button.is-selected { background: #ffd166; border-color: #a66a00; color: #332100; }
+      .accordion-diagram { display: grid; grid-template-columns: 264px 78px 92px; justify-content: center; gap: 12px; min-height: 620px; padding: 16px; border-radius: 8px; background: linear-gradient(90deg, #263239, #354246 48%, #293136); border: 1px solid #1b2528; }
+      .instrument-panel { background: #f8f8f2; border: 1px solid #bfc5bd; border-radius: 7px; padding: 10px; overflow: hidden; display: flex; justify-content: center; align-items: center; }
+      .bellows { display: flex; flex-direction: column; justify-content: stretch; gap: 8px; padding: 4px 0; }
+      .bellows span { flex: 1; background: #e7d9b9; border-left: 8px solid #b94d45; border-right: 8px solid #b94d45; clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+      svg { width: 100%; max-height: 590px; }
+      #bass { max-width: 236px; }
+      #piano { max-width: 70px; }
+      .piano-key { stroke: #111816; stroke-width: .8; }
+      .piano-key-white { fill: #fffdf5; }
+      .piano-key-black { fill: #1e2527; }
+      .piano-key.is-active { fill: #ffcf4a; stroke: #8a5600; stroke-width: 1.8; }
+      .key-label, .row-label { fill: #49524d; font-size: 7px; font-weight: 700; }
+      .bass-button { fill: #ecefe7; stroke: #4d5651; stroke-width: 1.2; }
+      .bass-button.is-active-bass  { fill: #49c6a3; stroke: #083d32; stroke-width: 2.2; }
+      .bass-button.is-active-chord { fill: #ffd166; stroke: #7a4f00; stroke-width: 2.2; }
+      .button-label { fill: #17201d; font-size: 7px; text-anchor: middle; pointer-events: none; font-weight: 800; }
+      .button-label-suffix { font-size: 5px; font-weight: 800; }
+      dl { display: grid; gap: 10px; margin: 12px 0 0; }
+      dl div { border-top: 1px solid #ebe8dd; padding-top: 10px; }
+      dt { color: #667069; font-size: 12px; font-weight: 800; text-transform: uppercase; }
+      dd { margin: 3px 0 0; line-height: 1.4; }
+      .warnings { margin-top: 16px; padding: 12px; border-radius: 7px; background: #fff4d7; border: 1px solid #e4bd5a; }
+      .warnings h3 { margin: 0 0 8px; font-size: 15px; }
+      .autoplay-bar { display: flex; align-items: center; gap: 14px; margin-top: 8px; padding: 10px 14px; border: 1px solid #d8d8cf; background: #fffefb; border-radius: 8px; flex-wrap: wrap; }
+      .autoplay-bar #playbtn { min-width: 100px; font-size: 15px; }
+      .autoplay-bar #playbtn.is-playing { background: #fff0f0; border-color: #c0392b; color: #7a1a10; }
+      .bpm-group { display: flex; align-items: center; gap: 8px; }
+      .bpm-group label { font-size: 13px; font-weight: 700; color: #49524d; }
+      #bpmslider { width: 130px; accent-color: #2f5f65; cursor: pointer; }
+      #bpmnum { width: 58px; padding: 0 6px; height: 36px; border: 1px solid #2f5f65; border-radius: 6px; font: inherit; font-size: 14px; text-align: center; }
+      .beat-flash { display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: transparent; border: 2px solid #bfc5bd; transition: background 0.05s; margin-left: 4px; }
+      .beat-flash.strong { background: #ff6b4a; border-color: #c0392b; }
+      .beat-flash.weak   { background: #ffd166; border-color: #a68200; }
+      @media (max-width: 1100px) { .workspace-grid { grid-template-columns: 1fr; } .accordion-diagram { grid-template-columns: 264px 78px 92px; } }
+      @media (max-width: 560px) { body { padding: 10px; } .upload-panel, .beat-navigator, .accordion-diagram { display: flex; flex-direction: column; } .bellows { display: none; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="upload-panel">
+        <div>
+          <h1>Accordion Tutor</h1>
+          <p>Upload uncompressed MusicXML/XML scores, then step through them beat by beat.</p>
+        </div>
+        <div class="upload-actions">
+          <label class="file-picker">Upload Score<input id="file" type="file" accept=".pdf,.musicxml,.xml,.mxl" /></label>
+          <button id="sample">Load Sample</button>
+        </div>
+      </section>
+      <section class="beat-navigator">
+        <button id="prev">← Prev</button>
+        <div class="beat-position"><span id="measure"></span><strong id="beat"></strong><span id="count"></span></div>
+        <button id="next">Next →</button>
+      </section>
+      <div class="autoplay-bar">
+        <button id="playbtn">▶ Play</button>
+        <div class="bpm-group">
+          <label for="bpmslider">BPM</label>
+          <input id="bpmslider" type="range" min="20" max="200" value="80">
+          <input id="bpmnum" type="number" min="20" max="200" value="80">
+        </div>
+        <span id="beat-flash" class="beat-flash" aria-hidden="true"></span>
+      </div>
+      <div class="workspace-grid">
+        <section class="score-viewer">
+          <div class="score-header"><h2>Score</h2><span id="score-position"></span></div>
+          <div id="beat-strip" class="beat-strip"></div>
+        </section>
+        <section class="accordion-diagram">
+          <div class="instrument-panel"><svg id="bass" viewBox="-18 0 225 672"></svg></div>
+          <div class="bellows"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+          <div class="instrument-panel"><svg id="piano" viewBox="0 0 54 528"></svg></div>
+        </section>
+        <aside class="beat-info">
+          <h2>Current Beat</h2>
+          <dl id="info"></dl>
+          <div id="warnings"></div>
+        </aside>
+      </div>
+    </main>
+    <script>
+      const roots = ["A#","D#","G#","C#","F#","B","E","A","D","G","C","F","Bb","Eb","Ab","Db","Gb","Cb","Fb","Bbb"];
+      const rows = ["diminished","seventh","minor","major","bass","counterbass"];
+      const rowNames = { diminished: "Dim", seventh: "7th", minor: "Minor", major: "Major", bass: "Bass", counterbass: "Counter" };
+      const counterbassLabels = { "A#":"Cx", "D#":"Fx", "G#":"B#", "C#":"E#", "F#":"A#", B:"D#", E:"G#", A:"C#", D:"F#", G:"B", C:"E", F:"A", Bb:"D", Eb:"G", Ab:"C", Db:"F", Gb:"Bb", Cb:"Eb", Fb:"Ab", Bbb:"Db" };
+      const chordLabels = { bass: r => r, counterbass: r => counterbassLabels[r] || r, major: r => r, minor: r => r + "m", seventh: r => r + "7", diminished: r => r + "dim" };
+      const bassHeaderXOffset = -8;
+      const bassHeaderYOffset = 12;
+      const bassButtonXOffset = 2;
+      const bassButtonYOffset = 26;
+      const $ = id => document.getElementById(id);
+      const textOf = (node, selector) => node?.querySelector(selector)?.textContent?.trim();
+      const asNumber = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+      const pitch = name => ({ name });
+      const note = (id, name, duration, held = false) => ({ id, pitch: pitch(name), durationBeats: duration, isSustained: held });
+      const parseChordQuality = raw => {
+        const match = raw.match(/^([A-G](?:#|b)?)(.*)$/);
+        if (!match) return { root: raw, quality: "unknown" };
+        const suffix = match[2].trim();
+        const quality = suffix === "" || /^maj(or)?$/i.test(suffix) ? "major" : /^(m|min|-)$/.test(suffix) ? "minor" : suffix === "7" ? "seventh" : /^dim$/i.test(suffix) ? "diminished" : "unknown";
+        return { root: match[1], quality };
+      };
+      const isBassbeat = (beatNumber, beatsPerMeasure) =>
+        beatsPerMeasure === 3 ? beatNumber === 1 : beatNumber % 2 === 1;
+      const allChordButtons = raw => {
+        const parsed = parseChordQuality(raw || "");
+        if (parsed.quality === "unknown" || !roots.includes(parsed.root)) return [];
+        return [{ id: "bass-" + parsed.root }, { id: parsed.quality + "-" + parsed.root }];
+      };
+      const selectChordButton = (raw, beatNumber, beatsPerMeasure) => {
+        const parsed = parseChordQuality(raw || "");
+        if (parsed.quality === "unknown" || !roots.includes(parsed.root)) return { buttons: [], action: "none" };
+        if (isBassbeat(beatNumber, beatsPerMeasure)) {
+          return { buttons: [{ id: "bass-" + parsed.root, label: parsed.root }], action: "bass" };
+        }
+        return { buttons: [{ id: parsed.quality + "-" + parsed.root, label: chordLabels[parsed.quality](parsed.root) }], action: "chord" };
+      };
+      const chordWarnings = raw => raw && !allChordButtons(raw).length ? [`Unsupported chord symbol: ${raw}`] : [];
+      const buildBeat = (id, measureNumber, beatNumber, notes, chord, beatsPerMeasure = 4, warnings = []) => {
+        const { buttons, action } = chord ? selectChordButton(chord, beatNumber, beatsPerMeasure) : { buttons: [], action: "none" };
+        return { id, measureNumber, beatNumber, beatsPerMeasure, activeRightHandNotes: notes, startingRightHandNotes: notes.filter(n => !n.isSustained), chordSymbol: chord ? { raw: chord } : undefined, activeLeftHandButtons: buttons, leftHandAction: action, warnings: warnings.concat(chordWarnings(chord)) };
+      };
+      const sampleEvents = [
+        buildBeat("m1-b1", 1, 1, [note("c4","C4",2), note("e4","E4",1), note("g4","G4",1)], "C", 4),
+        buildBeat("m1-b2", 1, 2, [note("c4h","C4",1,true), note("d4","D4",1)], "C", 4),
+        buildBeat("m1-b3", 1, 3, [note("f4","F4",2), note("a4","A4",1)], "Dm", 4),
+        buildBeat("m1-b4", 1, 4, [note("f4h","F4",1,true)], "Dm", 4),
+        buildBeat("m2-b1", 2, 1, [note("e5","E5",1)], "G7", 4),
+        buildBeat("m2-b2", 2, 2, [note("g5","G5",1)], "G7", 4),
+        buildBeat("m2-b3", 2, 3, [note("fs4","F#4",2)], "Bbdim", 4),
+        buildBeat("m2-b4", 2, 4, [note("fs4h","F#4",1,true)], "Bbdim", 4)
+      ];
+      let events = sampleEvents;
+      let index = 0;
+      let globalWarnings = [];
+      function pitchName(pitchEl) {
+        const step = textOf(pitchEl, "step");
+        const octave = textOf(pitchEl, "octave");
+        const alter = asNumber(textOf(pitchEl, "alter"), 0);
+        if (!step || !octave) return "";
+        return `${step}${alter === 1 ? "#" : alter === -1 ? "b" : ""}${octave}`;
+      }
+      function harmonyRaw(harmony) {
+        const step = textOf(harmony, "root-step");
+        if (!step) return "";
+        const alter = asNumber(textOf(harmony, "root-alter"), 0);
+        const root = `${step}${alter === 1 ? "#" : alter === -1 ? "b" : ""}`;
+        const kind = harmony.querySelector("kind");
+        const text = kind?.getAttribute("text")?.replace(/\s+/g, "");
+        if (text) return /^[A-G]/.test(text) ? text : root + text;
+        const kindValue = kind?.textContent?.trim() || "major";
+        const suffix = kindValue === "minor" ? "m" : kindValue === "dominant" || kindValue.includes("seventh") ? "7" : kindValue.includes("diminished") ? "dim" : "";
+        return root + suffix;
+      }
+      function chordFromText(rawText) {
+        const normalized = String(rawText || "").replace(/♭/g, "b").replace(/♯/g, "#");
+        const pattern = /(^|[^A-Za-z0-9#b♭♯])([A-G](?:#|b|♭|♯)?(?:m|min|-|7|dim)?)(?=$|[^A-Za-z0-9#b♭♯])/g;
+        for (const match of normalized.matchAll(pattern)) {
+          if (allChordButtons(match[2]).length) return match[2];
+        }
+        return "";
+      }
+      function textForChordScan(element) {
+        return Array.from(element.querySelectorAll("words, rehearsal, lyric text, credit-words")).map(node => node.textContent || "").join(" ");
+      }
+      function parseMusicXml(xmlText) {
+        const warnings = [];
+        const doc = new DOMParser().parseFromString(xmlText, "application/xml");
+        if (doc.querySelector("parsererror")) return { events: [], warnings: ["MusicXML parse failure. Check the file format."] };
+        const parts = Array.from(doc.querySelectorAll("part"));
+        if (!parts.length) return { events: [], warnings: ["Missing MusicXML part data."] };
+        const notes = [];
+        const chordsByBeat = new Map();
+        const measures = [];
+        parts.forEach((part, partIndex) => {
+          let divisions = 1;
+          let beatsPerMeasure = 4;
+          let measureStart = 0;
+          Array.from(part.children).filter(child => child.localName === "measure").forEach((measure, measureIndex) => {
+            const attributes = measure.querySelector("attributes");
+            divisions = asNumber(textOf(attributes, "divisions"), divisions);
+            beatsPerMeasure = asNumber(textOf(attributes, "time > beats"), beatsPerMeasure);
+            const measureNumber = asNumber(measure.getAttribute("number"), measureIndex + 1);
+            if (partIndex === 0) measures.push({ measureNumber, start: measureStart, beats: beatsPerMeasure });
+            let cursor = 0;
+            let lastNoteStart = 0;
+            Array.from(measure.children).forEach((child, childIndex) => {
+              if (child.localName === "backup") { cursor -= asNumber(textOf(child, "duration"), 0); return; }
+              if (child.localName === "forward") { cursor += asNumber(textOf(child, "duration"), 0); return; }
+              if (child.localName === "harmony") {
+                chordsByBeat.set(measureStart + Math.floor(cursor / divisions), harmonyRaw(child));
+                return;
+              }
+              if (child.localName === "direction") {
+                const chord = chordFromText(textForChordScan(child));
+                if (chord) chordsByBeat.set(measureStart + Math.floor(cursor / divisions), chord);
+                return;
+              }
+              if (child.localName !== "note") return;
+              const lyricChord = chordFromText(textForChordScan(child));
+              if (lyricChord) chordsByBeat.set(measureStart + Math.floor(cursor / divisions), lyricChord);
+              const duration = asNumber(textOf(child, "duration"), divisions);
+              const isChordTone = Boolean(child.querySelector("chord"));
+              const start = isChordTone ? lastNoteStart : cursor;
+              if (!child.querySelector("rest") && partIndex === 0) {
+                const name = pitchName(child.querySelector("pitch"));
+                if (name) notes.push({ id: `m${measureNumber}-n${childIndex}-${name}`, pitch: pitch(name), start: measureStart + start / divisions, durationBeats: Math.max(duration / divisions, 0.25) });
+              }
+              if (!isChordTone) {
+                lastNoteStart = start;
+                cursor += duration;
+              }
+            });
+            measureStart += beatsPerMeasure;
+          });
+        });
+        const parsedEvents = [];
+        let currentChord = "";
+        measures.forEach(measure => {
+          for (let beat = 0; beat < measure.beats; beat++) {
+            const absoluteBeat = measure.start + beat;
+            if (chordsByBeat.has(absoluteBeat)) currentChord = chordsByBeat.get(absoluteBeat);
+            const activeNotes = notes.filter(n => n.start <= absoluteBeat && n.start + n.durationBeats > absoluteBeat).map(n => ({ ...n, isSustained: n.start < absoluteBeat }));
+            const startingNotes = notes.filter(n => Math.abs(n.start - absoluteBeat) < 0.001);
+            const beatWarnings = currentChord ? [] : [`Measure ${measure.measureNumber}, Beat ${beat + 1}: No chord symbol detected.`];
+            const beatNumber = beat + 1;
+            const { buttons: lhButtons, action: lhAction } = currentChord ? selectChordButton(currentChord, beatNumber, measure.beats) : { buttons: [], action: "none" };
+            parsedEvents.push({ id: `m${measure.measureNumber}-b${beatNumber}`, measureNumber: measure.measureNumber, beatNumber, beatsPerMeasure: measure.beats, activeRightHandNotes: activeNotes, startingRightHandNotes: startingNotes, chordSymbol: currentChord ? { raw: currentChord } : undefined, activeLeftHandButtons: lhButtons, leftHandAction: lhAction, warnings: beatWarnings.concat(chordWarnings(currentChord)) });
+          }
+        });
+        if (!parsedEvents.length) warnings.push("No beat events could be extracted from this MusicXML file.");
+        return { events: parsedEvents, warnings };
+      }
+      function renderPiano(active) {
+        const range = ["F3","F#3","G3","G#3","A3","A#3","B3","C4","C#4","D4","D#4","E4","F4","F#4","G4","G#4","A4","A#4","B4","C5","C#5","D5","D#5","E5","F5","F#5","G5","G#5","A5","A#5","B5","C6","C#6","D6","D#6","E6","F6","F#6","G6","G#6","A6"];
+        const whites = new Set(["C","D","E","F","G","A","B"]);
+        const blackAfterWhite = { "C#":"C", "D#":"D", "F#":"F", "G#":"G", "A#":"A" };
+        const whiteY = new Map();
+        let html = "", whiteIndex = 0;
+        for (const id of range) {
+          const pc = id.slice(0, -1);
+          if (whites.has(pc)) {
+            const y = whiteIndex * 22;
+            whiteY.set(id, y);
+            html += `<g><rect class="piano-key piano-key-white ${active.has(id) ? "is-active" : ""}" x="0" y="${y}" width="44" height="22" rx="2"></rect>${["F3","C4","C5","C6","A6"].includes(id) ? `<text class="key-label" x="48" y="${y + 15}">${id}</text>` : ""}</g>`;
+            whiteIndex++;
+          }
+        }
+        for (const id of range) {
+          const pc = id.slice(0, -1), octave = id.slice(-1);
+          const previousWhite = blackAfterWhite[pc];
+          if (previousWhite && whiteY.has(previousWhite + octave)) {
+            const y = whiteY.get(previousWhite + octave) + 22 * 0.65;
+            html += `<rect class="piano-key piano-key-black ${active.has(id) ? "is-active" : ""}" x="0" y="${y}" width="28" height="14" rx="2"></rect>`;
+          }
+        }
+        $("piano").innerHTML = html;
+      }
+      function renderBass(beat) {
+        const activeIds = new Set(beat.activeLeftHandButtons.map(b => b.id));
+        const activeClass = beat.leftHandAction === "bass" ? "is-active-bass" : beat.leftHandAction === "chord" ? "is-active-chord" : "";
+        const splitLabel = label => label.endsWith("dim") ? [label.slice(0, -3), "dim"] : label.endsWith("7") ? [label.slice(0, -1), "7"] : label.endsWith("m") ? [label.slice(0, -1), "m"] : [label];
+        let html = rows.map((row, rowIndex) => `<text class="row-label" x="${bassHeaderXOffset + rowIndex * 34}" y="${bassHeaderYOffset + 16}">${rowNames[row]}</text>`).join("");
+        rows.forEach((row, rowIndex) => roots.forEach((root, columnIndex) => {
+          const x = bassButtonXOffset + rowIndex * 34, y = bassButtonYOffset + 34 + columnIndex * 27 + rowIndex * 13, id = row + "-" + root, label = splitLabel(chordLabels[row](root));
+          html += `<g><circle class="bass-button ${activeIds.has(id) ? activeClass : ""}" cx="${x}" cy="${y}" r="11"></circle><text class="button-label" x="${x}" y="${y + 3}">${label[0]}${label[1] ? `<tspan x="${x}" dy="6" class="button-label-suffix">${label[1]}</tspan>` : ""}</text></g>`;
+        }));
+        $("bass").innerHTML = html;
+      }
+      function render() {
+        const beat = events[index] || sampleEvents[0];
+        $("measure").textContent = `Measure ${beat.measureNumber}`;
+        $("beat").textContent = `Beat ${beat.beatNumber}`;
+        $("count").textContent = `${index + 1} / ${events.length}`;
+        $("score-position").textContent = `Measure ${beat.measureNumber}, Beat ${beat.beatNumber}`;
+        $("prev").disabled = index === 0;
+        $("next").disabled = index === events.length - 1;
+        $("beat-strip").innerHTML = events.map((b, i) => `<button class="${i === index ? "is-selected" : ""}" data-i="${i}">M${b.measureNumber} B${b.beatNumber}</button>`).join("");
+        $("beat-strip").querySelectorAll("button").forEach(btn => btn.onclick = () => { index = Number(btn.dataset.i); render(); });
+        renderPiano(new Set(beat.activeRightHandNotes.map(n => n.pitch.name.replace(/^Db/,"C#").replace(/^Eb/,"D#").replace(/^Gb/,"F#").replace(/^Ab/,"G#").replace(/^Bb/,"A#"))));
+        renderBass(beat);
+        const btn = beat.activeLeftHandButtons[0];
+        const actionColor = beat.leftHandAction === "bass" ? "#49c6a3" : beat.leftHandAction === "chord" ? "#ffd166" : "transparent";
+        const actionLabel = beat.leftHandAction === "bass" ? "Bass note" : beat.leftHandAction === "chord" ? "Chord button" : "—";
+        $("info").innerHTML = `<div><dt>Position</dt><dd>Measure ${beat.measureNumber}, Beat ${beat.beatNumber} / ${beat.beatsPerMeasure ?? 4}</dd></div><div><dt>Chord</dt><dd>${beat.chordSymbol?.raw || "None"}</dd></div><div><dt>Left Hand</dt><dd><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:700;background:${actionColor};color:#1a2420">${actionLabel}</span>${btn ? ` <strong>${btn.label}</strong>` : ""}</dd></div><div><dt>Right Hand</dt><dd>${beat.activeRightHandNotes.map(n => n.pitch.name + (n.isSustained ? " (held)" : "")).join(", ") || "Rest"}</dd></div>`;
+        const warnings = globalWarnings.concat(beat.warnings);
+        $("warnings").innerHTML = warnings.length ? `<div class="warnings"><h3>Warnings</h3><ul>${warnings.map(w => `<li>${w}</li>`).join("")}</ul></div>` : "";
+      }
+      // ── Autoplay / Metronome ───────────────────────────────────────────
+      let bpm = 80;
+      let playing = false;
+      let playTimer = null;
+      let audioCtx = null;
+
+      function getAudioCtx() {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === "suspended") audioCtx.resume();
+        return audioCtx;
+      }
+
+      function playClick(strong) {
+        try {
+          const ctx = getAudioCtx();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.type = "sine";
+          osc.frequency.value = strong ? 1050 : 750;
+          gain.gain.setValueAtTime(strong ? 0.45 : 0.28, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.08);
+          osc.start(ctx.currentTime);
+          osc.stop(ctx.currentTime + 0.09);
+        } catch (_) {}
+      }
+
+      function flashBeat(strong) {
+        const dot = $("beat-flash");
+        dot.classList.remove("strong", "weak");
+        dot.classList.add(strong ? "strong" : "weak");
+        setTimeout(() => dot.classList.remove("strong", "weak"), 120);
+      }
+
+      function scheduleNext() {
+        const interval = Math.round(60000 / bpm);
+        playTimer = setTimeout(() => {
+          if (!playing) return;
+          if (index >= events.length - 1) {
+            stopAutoplay();
+            return;
+          }
+          index++;
+          const beat = events[index];
+          const strong = beat.beatNumber === 1;
+          playClick(strong);
+          flashBeat(strong);
+          render();
+          scheduleNext();
+        }, interval);
+      }
+
+      function startAutoplay() {
+        playing = true;
+        $("playbtn").textContent = "⏹ Stop";
+        $("playbtn").classList.add("is-playing");
+        const beat = events[index];
+        const strong = beat ? beat.beatNumber === 1 : true;
+        playClick(strong);
+        flashBeat(strong);
+        scheduleNext();
+      }
+
+      function stopAutoplay() {
+        playing = false;
+        clearTimeout(playTimer);
+        playTimer = null;
+        $("playbtn").textContent = "▶ Play";
+        $("playbtn").classList.remove("is-playing");
+      }
+
+      $("playbtn").onclick = () => { playing ? stopAutoplay() : startAutoplay(); };
+
+      $("bpmslider").oninput = () => {
+        bpm = Math.min(200, Math.max(20, Number($("bpmslider").value)));
+        $("bpmnum").value = bpm;
+      };
+      $("bpmnum").oninput = () => {
+        bpm = Math.min(200, Math.max(20, Number($("bpmnum").value) || bpm));
+        $("bpmslider").value = bpm;
+      };
+      // ──────────────────────────────────────────────────────────────────
+
+      $("prev").onclick = () => { stopAutoplay(); index = Math.max(0, index - 1); render(); };
+      $("next").onclick = () => { stopAutoplay(); index = Math.min(events.length - 1, index + 1); render(); };
+      document.addEventListener("keydown", e => {
+        if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+        if (e.key === "ArrowRight") { e.preventDefault(); stopAutoplay(); index = Math.min(events.length - 1, index + 1); render(); }
+        else if (e.key === "ArrowLeft") { e.preventDefault(); stopAutoplay(); index = Math.max(0, index - 1); render(); }
+        else if (e.key === " ") { e.preventDefault(); playing ? stopAutoplay() : startAutoplay(); }
+        else if (e.key === "Home") { e.preventDefault(); stopAutoplay(); index = 0; render(); }
+        else if (e.key === "End") { e.preventDefault(); stopAutoplay(); index = events.length - 1; render(); }
+      });
+      $("sample").onclick = () => { stopAutoplay(); events = sampleEvents; globalWarnings = []; index = 0; render(); };
+      async function convertPdf(file) {
+        const body = new FormData();
+        body.append("score", file);
+        const response = await fetch("http://localhost:8787/api/omr", { method: "POST", body });
+        const result = await response.json();
+        if (!response.ok || !result.musicXml) {
+          return {
+            events: [],
+            warnings: [
+              ...(result.warnings || []),
+              result.details || result.error || "OMR conversion failed."
+            ]
+          };
+        }
+        const parsed = parseMusicXml(result.musicXml);
+        return {
+          events: parsed.events,
+          warnings: [`PDF converted: ${file.name}`, ...(result.warnings || []), ...parsed.warnings]
+        };
+      }
+      $("file").onchange = async e => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const name = file.name.toLowerCase();
+        if (name.endsWith(".pdf")) {
+          globalWarnings = [`PDF uploaded: ${file.name}`, "Converting with local OMR server..."];
+          render();
+          try {
+            const parsed = await convertPdf(file);
+            if (parsed.events.length) {
+              stopAutoplay();
+              events = parsed.events;
+              index = 0;
+            }
+            globalWarnings = parsed.warnings;
+          } catch {
+            globalWarnings = [`PDF uploaded: ${file.name}`, "Start the local OMR server with npm run omr:server and configure AUDIVERIS_CMD to enable PDF recognition."];
+          }
+          render();
+          return;
+        }
+        if (name.endsWith(".mxl")) { globalWarnings = ["Compressed .mxl upload is recognized, but archive decompression is not implemented in this preview. Export uncompressed .musicxml or .xml."]; render(); return; }
+        if (!name.endsWith(".xml") && !name.endsWith(".musicxml")) { globalWarnings = ["Unsupported file type. Use .musicxml, .xml, .mxl, or .pdf."]; render(); return; }
+        const reader = new FileReader();
+        reader.onload = () => {
+          const parsed = parseMusicXml(String(reader.result || ""));
+          if (parsed.events.length) {
+            stopAutoplay();
+            events = parsed.events;
+            index = 0;
+            globalWarnings = [`MusicXML loaded: ${file.name}`, ...parsed.warnings];
+          } else {
+            globalWarnings = parsed.warnings;
+          }
+          render();
+        };
+        reader.readAsText(file);
+      };
+      render();
+    </script>
+  </body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
