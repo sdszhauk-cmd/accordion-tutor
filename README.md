@@ -166,7 +166,7 @@ For PDF upload, also complete the OMR server setup below.
 **Requirements:** Node.js 18+
 
 ```bash
-git clone https://github.com/<your-username>/accordion-tutor.git
+git clone https://github.com/sdszhauk-cmd/accordion-tutor.git
 cd accordion-tutor
 npm install
 npm run dev
