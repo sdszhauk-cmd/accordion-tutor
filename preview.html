@@ -147,7 +147,9 @@
       const chordWarnings = raw => raw && !allChordButtons(raw).length ? [`Unsupported chord symbol: ${raw}`] : [];
       const buildBeat = (id, measureNumber, beatNumber, notes, chord, beatsPerMeasure = 4, warnings = []) => {
         const { buttons, action } = chord ? selectChordButton(chord, beatNumber, beatsPerMeasure) : { buttons: [], action: "none" };
-        return { id, measureNumber, beatNumber, beatsPerMeasure, activeRightHandNotes: notes, startingRightHandNotes: notes.filter(n => !n.isSustained), chordSymbol: chord ? { raw: chord } : undefined, activeLeftHandButtons: buttons, leftHandAction: action, warnings: warnings.concat(chordWarnings(chord)) };
+        const startingNotes = notes.filter(n => !n.isSustained);
+        const noteOnsets = startingNotes.length ? [{ posInBeat: 0, notes: startingNotes }] : [];
+        return { id, measureNumber, beatNumber, beatsPerMeasure, noteOnsets, activeRightHandNotes: notes, startingRightHandNotes: startingNotes, chordSymbol: chord ? { raw: chord } : undefined, activeLeftHandButtons: buttons, leftHandAction: action, warnings: warnings.concat(chordWarnings(chord)) };
       };
       const sampleEvents = [
         buildBeat("m1-b1", 1, 1, [note("c4","C4",2), note("e4","E4",1), note("g4","G4",1)], "C", 4),
@@ -247,14 +249,25 @@
         let currentChord = "";
         measures.forEach(measure => {
           for (let beat = 0; beat < measure.beats; beat++) {
-            const absoluteBeat = measure.start + beat;
-            if (chordsByBeat.has(absoluteBeat)) currentChord = chordsByBeat.get(absoluteBeat);
-            const activeNotes = notes.filter(n => n.start <= absoluteBeat && n.start + n.durationBeats > absoluteBeat).map(n => ({ ...n, isSustained: n.start < absoluteBeat }));
-            const startingNotes = notes.filter(n => Math.abs(n.start - absoluteBeat) < 0.001);
-            const beatWarnings = currentChord ? [] : [`Measure ${measure.measureNumber}, Beat ${beat + 1}: No chord symbol detected.`];
+            const beatStart = measure.start + beat;
+            if (chordsByBeat.has(beatStart)) currentChord = chordsByBeat.get(beatStart);
             const beatNumber = beat + 1;
+            // Group all notes starting within this beat into onset buckets
+            const onsetMap = new Map();
+            notes.forEach(n => {
+              const posInBeat = n.start - beatStart;
+              if (posInBeat >= -0.001 && posInBeat < 1 - 0.001) {
+                const key = Math.round(posInBeat * 1000);
+                if (!onsetMap.has(key)) onsetMap.set(key, { posInBeat, notes: [] });
+                onsetMap.get(key).notes.push(n);
+              }
+            });
+            const noteOnsets = Array.from(onsetMap.values()).sort((a, b) => a.posInBeat - b.posInBeat);
+            const activeNotes = notes.filter(n => n.start <= beatStart && n.start + n.durationBeats > beatStart).map(n => ({ ...n, isSustained: n.start < beatStart }));
+            const startingNotes = notes.filter(n => Math.abs(n.start - beatStart) < 0.001);
+            const beatWarnings = currentChord ? [] : [`Measure ${measure.measureNumber}, Beat ${beatNumber}: No chord symbol detected.`];
             const { buttons: lhButtons, action: lhAction } = currentChord ? selectChordButton(currentChord, beatNumber, measure.beats) : { buttons: [], action: "none" };
-            parsedEvents.push({ id: `m${measure.measureNumber}-b${beatNumber}`, measureNumber: measure.measureNumber, beatNumber, beatsPerMeasure: measure.beats, activeRightHandNotes: activeNotes, startingRightHandNotes: startingNotes, chordSymbol: currentChord ? { raw: currentChord } : undefined, activeLeftHandButtons: lhButtons, leftHandAction: lhAction, warnings: beatWarnings.concat(chordWarnings(currentChord)) });
+            parsedEvents.push({ id: `m${measure.measureNumber}-b${beatNumber}`, measureNumber: measure.measureNumber, beatNumber, beatsPerMeasure: measure.beats, noteOnsets, activeRightHandNotes: activeNotes, startingRightHandNotes: startingNotes, chordSymbol: currentChord ? { raw: currentChord } : undefined, activeLeftHandButtons: lhButtons, leftHandAction: lhAction, warnings: beatWarnings.concat(chordWarnings(currentChord)) });
           }
         });
         if (!parsedEvents.length) warnings.push("No beat events could be extracted from this MusicXML file.");
@@ -296,22 +309,42 @@
         }));
         $("bass").innerHTML = html;
       }
+      let noteAnimTimer = null;
+      function clearNoteAnim() {
+        if (noteAnimTimer) { clearTimeout(noteAnimTimer); noteAnimTimer = null; }
+      }
+      function animateOnsets(beat, idx) {
+        const onsets = beat.noteOnsets || [];
+        if (idx >= onsets.length) return;
+        const onset = onsets[idx];
+        renderPiano(new Set(onset.notes.map(n => n.pitch.name.replace(/^Db/,"C#").replace(/^Eb/,"D#").replace(/^Gb/,"F#").replace(/^Ab/,"G#").replace(/^Bb/,"A#"))));
+        if (idx + 1 < onsets.length) {
+          const gap = onsets[idx + 1].posInBeat - onset.posInBeat;
+          const delay = Math.max(80, gap * (60000 / bpm));
+          noteAnimTimer = setTimeout(() => animateOnsets(beat, idx + 1), delay);
+        }
+      }
       function render() {
+        clearNoteAnim();
         const beat = events[index] || sampleEvents[0];
+        const beatLabel = `Beat ${beat.beatNumber}`;
         $("measure").textContent = `Measure ${beat.measureNumber}`;
-        $("beat").textContent = `Beat ${beat.beatNumber}`;
+        $("beat").textContent = beatLabel;
         $("count").textContent = `${index + 1} / ${events.length}`;
-        $("score-position").textContent = `Measure ${beat.measureNumber}, Beat ${beat.beatNumber}`;
+        $("score-position").textContent = `Measure ${beat.measureNumber}, ${beatLabel}`;
         $("prev").disabled = index === 0;
         $("next").disabled = index === events.length - 1;
-        $("beat-strip").innerHTML = events.map((b, i) => `<button class="${i === index ? "is-selected" : ""}" data-i="${i}">M${b.measureNumber} B${b.beatNumber}</button>`).join("");
+        $("beat-strip").innerHTML = events.map((b, i) =>
+          `<button class="${i === index ? "is-selected" : ""}" data-i="${i}">M${b.measureNumber} B${b.beatNumber}</button>`
+        ).join("");
         $("beat-strip").querySelectorAll("button").forEach(btn => btn.onclick = () => { index = Number(btn.dataset.i); render(); });
-        renderPiano(new Set(beat.activeRightHandNotes.map(n => n.pitch.name.replace(/^Db/,"C#").replace(/^Eb/,"D#").replace(/^Gb/,"F#").replace(/^Ab/,"G#").replace(/^Bb/,"A#"))));
+        animateOnsets(beat, 0);
         renderBass(beat);
         const btn = beat.activeLeftHandButtons[0];
         const actionColor = beat.leftHandAction === "bass" ? "#49c6a3" : beat.leftHandAction === "chord" ? "#ffd166" : "transparent";
         const actionLabel = beat.leftHandAction === "bass" ? "Bass note" : beat.leftHandAction === "chord" ? "Chord button" : "—";
-        $("info").innerHTML = `<div><dt>Position</dt><dd>Measure ${beat.measureNumber}, Beat ${beat.beatNumber} / ${beat.beatsPerMeasure ?? 4}</dd></div><div><dt>Chord</dt><dd>${beat.chordSymbol?.raw || "None"}</dd></div><div><dt>Left Hand</dt><dd><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:700;background:${actionColor};color:#1a2420">${actionLabel}</span>${btn ? ` <strong>${btn.label}</strong>` : ""}</dd></div><div><dt>Right Hand</dt><dd>${beat.activeRightHandNotes.map(n => n.pitch.name + (n.isSustained ? " (held)" : "")).join(", ") || "Rest"}</dd></div>`;
+        const posLabel = `Measure ${beat.measureNumber}, ${beatLabel} / ${beat.beatsPerMeasure ?? 4}`;
+        $("info").innerHTML = `<div><dt>Position</dt><dd>${posLabel}</dd></div><div><dt>Chord</dt><dd>${beat.chordSymbol?.raw || "None"}</dd></div><div><dt>Left Hand</dt><dd><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:700;background:${actionColor};color:#1a2420">${actionLabel}</span>${btn ? ` <strong>${btn.label}</strong>` : ""}</dd></div><div><dt>Right Hand</dt><dd>${beat.activeRightHandNotes.map(n => n.pitch.name + (n.isSustained ? " (held)" : "")).join(", ") || "Rest"}</dd></div>`;
         const warnings = globalWarnings.concat(beat.warnings);
         $("warnings").innerHTML = warnings.length ? `<div class="warnings"><h3>Warnings</h3><ul>${warnings.map(w => `<li>${w}</li>`).join("")}</ul></div>` : "";
       }
@@ -383,6 +416,7 @@
         playing = false;
         clearTimeout(playTimer);
         playTimer = null;
+        clearNoteAnim();
         $("playbtn").textContent = "▶ Play";
         $("playbtn").classList.remove("is-playing");
       }
