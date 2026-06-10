@@ -89,6 +89,9 @@
           <input id="bpmnum" type="number" min="20" max="200" value="80">
         </div>
         <span id="beat-flash" class="beat-flash" aria-hidden="true"></span>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:#49524d;cursor:pointer;user-select:none">
+          <input type="checkbox" id="notesound" style="width:15px;height:15px;accent-color:#2f5f65;cursor:pointer"> Note sound
+        </label>
       </div>
       <div class="workspace-grid">
         <section class="score-viewer">
@@ -309,6 +312,37 @@
         }));
         $("bass").innerHTML = html;
       }
+      let noteSound = false;
+      $("notesound").onchange = () => { noteSound = $("notesound").checked; };
+
+      const NOTE_SEMITONES = { C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11 };
+      function noteToFreq(pitchName) {
+        const m = pitchName.match(/^([A-G][b#]?)(\d)$/);
+        if (!m) return null;
+        const semi = NOTE_SEMITONES[m[1]];
+        if (semi === undefined) return null;
+        const midi = 12 * (Number(m[2]) + 1) + semi;
+        return 440 * Math.pow(2, (midi - 69) / 12);
+      }
+      function playNoteChord(notes) {
+        try {
+          const ctx = getAudioCtx();
+          notes.forEach(n => {
+            const freq = noteToFreq(n.pitch.name.replace(/^Db/,"C#").replace(/^Eb/,"D#").replace(/^Gb/,"F#").replace(/^Ab/,"G#").replace(/^Bb/,"A#"));
+            if (!freq) return;
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.type = "triangle";
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0.18, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.55);
+            osc.start(ctx.currentTime);
+            osc.stop(ctx.currentTime + 0.56);
+          });
+        } catch (_) {}
+      }
+
       let noteAnimTimer = null;
       function clearNoteAnim() {
         if (noteAnimTimer) { clearTimeout(noteAnimTimer); noteAnimTimer = null; }
@@ -318,6 +352,7 @@
         if (idx >= onsets.length) return;
         const onset = onsets[idx];
         renderPiano(new Set(onset.notes.map(n => n.pitch.name.replace(/^Db/,"C#").replace(/^Eb/,"D#").replace(/^Gb/,"F#").replace(/^Ab/,"G#").replace(/^Bb/,"A#"))));
+        if (noteSound) playNoteChord(onset.notes);
         if (idx + 1 < onsets.length) {
           const gap = onsets[idx + 1].posInBeat - onset.posInBeat;
           const delay = Math.max(80, gap * (60000 / bpm));
