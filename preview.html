@@ -92,6 +92,9 @@
         <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:#49524d;cursor:pointer;user-select:none">
           <input type="checkbox" id="notesound" style="width:15px;height:15px;accent-color:#2f5f65;cursor:pointer"> Note sound
         </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:#49524d;cursor:pointer;user-select:none">
+          <input type="checkbox" id="basssound" style="width:15px;height:15px;accent-color:#2f5f65;cursor:pointer"> Bass sound
+        </label>
       </div>
       <div class="workspace-grid">
         <section class="score-viewer">
@@ -266,7 +269,7 @@
               }
             });
             const noteOnsets = Array.from(onsetMap.values()).sort((a, b) => a.posInBeat - b.posInBeat);
-            const activeNotes = notes.filter(n => n.start <= beatStart && n.start + n.durationBeats > beatStart).map(n => ({ ...n, isSustained: n.start < beatStart }));
+            const activeNotes = notes.filter(n => n.start <= beatStart + 0.001 && n.start + n.durationBeats > beatStart).map(n => ({ ...n, isSustained: n.start < beatStart - 0.001 }));
             const startingNotes = notes.filter(n => Math.abs(n.start - beatStart) < 0.001);
             const beatWarnings = currentChord ? [] : [`Measure ${measure.measureNumber}, Beat ${beatNumber}: No chord symbol detected.`];
             const { buttons: lhButtons, action: lhAction } = currentChord ? selectChordButton(currentChord, beatNumber, measure.beats) : { buttons: [], action: "none" };
@@ -313,9 +316,40 @@
         $("bass").innerHTML = html;
       }
       let noteSound = false;
+      let bassSound = false;
       $("notesound").onchange = () => { noteSound = $("notesound").checked; };
+      $("basssound").onchange = () => { bassSound = $("basssound").checked; };
 
-      const NOTE_SEMITONES = { C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11 };
+      const NOTE_SEMITONES = { C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11,Cb:11,Fb:4,Bbb:10 };
+      const CHORD_INTERVALS = { bass: [0], major: [0, 4, 7], minor: [0, 3, 7], seventh: [0, 4, 7, 10], diminished: [0, 3, 6] };
+      function playBassButtonSound(beat) {
+        const btn = beat.activeLeftHandButtons[0];
+        if (!btn) return;
+        try {
+          const ctx = getAudioCtx();
+          const m = btn.id.match(/^([^-]+)-(.+)$/);
+          if (!m) return;
+          const row = m[1], root = m[2];
+          const intervals = CHORD_INTERVALS[row];
+          if (!intervals) return;
+          const rootSemi = NOTE_SEMITONES[root];
+          if (rootSemi === undefined) return;
+          const octave = row === "bass" ? 4 : 4;
+          const baseMidi = 12 * (octave + 1) + rootSemi;
+          intervals.forEach(interval => {
+            const freq = 440 * Math.pow(2, (baseMidi + interval - 69) / 12);
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.type = "triangle";
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0.25, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.7);
+            osc.start(ctx.currentTime);
+            osc.stop(ctx.currentTime + 0.71);
+          });
+        } catch (_) {}
+      }
       function noteToFreq(pitchName) {
         const m = pitchName.match(/^([A-G][b#]?)(\d)$/);
         if (!m) return null;
@@ -351,8 +385,11 @@
         const onsets = beat.noteOnsets || [];
         if (idx >= onsets.length) return;
         const onset = onsets[idx];
-        renderPiano(new Set(onset.notes.map(n => n.pitch.name.replace(/^Db/,"C#").replace(/^Eb/,"D#").replace(/^Gb/,"F#").replace(/^Ab/,"G#").replace(/^Bb/,"A#"))));
-        if (noteSound) playNoteChord(onset.notes);
+        const toKey = n => n.pitch.name.replace(/^Db/,"C#").replace(/^Eb/,"D#").replace(/^Gb/,"F#").replace(/^Ab/,"G#").replace(/^Bb/,"A#");
+        // at first onset, show ALL active notes (new + held); subsequent onsets show only new notes
+        const displayNotes = idx === 0 ? beat.activeRightHandNotes : onset.notes;
+        renderPiano(new Set(displayNotes.map(toKey)));
+        if (noteSound) playNoteChord(displayNotes);
         if (idx + 1 < onsets.length) {
           const gap = onsets[idx + 1].posInBeat - onset.posInBeat;
           const delay = Math.max(80, gap * (60000 / bpm));
@@ -375,6 +412,7 @@
         $("beat-strip").querySelectorAll("button").forEach(btn => btn.onclick = () => { index = Number(btn.dataset.i); render(); });
         animateOnsets(beat, 0);
         renderBass(beat);
+        if (bassSound) playBassButtonSound(beat);
         const btn = beat.activeLeftHandButtons[0];
         const actionColor = beat.leftHandAction === "bass" ? "#49c6a3" : beat.leftHandAction === "chord" ? "#ffd166" : "transparent";
         const actionLabel = beat.leftHandAction === "bass" ? "Bass note" : beat.leftHandAction === "chord" ? "Chord button" : "—";
