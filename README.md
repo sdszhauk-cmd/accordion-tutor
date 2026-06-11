@@ -13,6 +13,9 @@ A beginner-friendly web app for **120-bass piano accordion** practice. Upload a 
 | **Bass / chord alternation** | Odd beats (1, 3) highlight the **bass note** button in green; even beats (2, 4) highlight the **chord button** in amber — never both at once |
 | **Autoplay metronome** | Plays a Web Audio click, advances beats automatically, stops at the last beat |
 | **BPM control** | Slider (20–200 BPM) + number input, both stay in sync. Default 80 BPM |
+| **Note sound** | Optional toggle — plays a short piano-like tone for each right-hand note as it lights up, including sub-beat off-beat notes in sequence |
+| **Bass sound** | Optional toggle — plays the Stradella button sound (single bass note on bass beats, full chord voicing on chord beats) |
+| **Sub-beat note animation** | When a beat contains off-beat notes, they are highlighted one by one at the correct rhythmic interval based on the current BPM |
 | **PDF upload** | Converts PDF scores to MusicXML via a local Audiveris OMR server |
 | **MusicXML upload** | Parsed entirely in the browser — no server required |
 | **Built-in sample score** | 2-measure demo (C → Dm → G7 → Bbdim) loads instantly |
@@ -264,6 +267,15 @@ The server starts on `http://localhost:8787`. Keep this terminal open while usin
 3. The app advances one beat per tick, plays a click sound (louder on beat 1), and flashes the indicator dot.
 4. Playback stops automatically at the last beat.
 5. Pressing `←` / `→` or clicking a beat while playing stops the autoplay.
+
+### Sound Toggles
+
+Both toggles are in the autoplay bar and are **off by default**.
+
+| Toggle | What it does |
+|---|---|
+| **Note sound** | Plays a short piano-like tone for each right-hand note as it is highlighted. On beats with off-beat notes, each note sounds at the correct rhythmic interval based on the current BPM. |
+| **Bass sound** | Plays the Stradella button sound each time a beat is navigated to. Bass beats play a single root note; chord beats play the full chord voicing (major, minor, dominant 7th, or diminished). |
 
 ### Uploading a Score
 
