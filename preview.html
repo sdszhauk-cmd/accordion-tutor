@@ -16,7 +16,9 @@
       .upload-panel { display: flex; justify-content: space-between; gap: 14px; padding: 14px 16px; align-items: center; }
       h1 { margin: 0 0 4px; font-size: 24px; letter-spacing: 0; }
       p { margin: 0; color: #59625d; }
-      .upload-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+      .upload-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+      #saved-scores { height: 36px; padding: 0 10px; font-size: 13px; font-weight: 600; border-radius: 6px; border: 1px solid #bfc5bd; background: #fff; color: #2a3a2e; cursor: pointer; min-width: 160px; }
+      #delete-score { height: 36px; width: 36px; padding: 0; font-size: 16px; font-weight: 700; border-radius: 6px; border: 1px solid #d4a0a0; background: #fff0f0; color: #a33; cursor: pointer; }
       .beat-navigator { display: grid; grid-template-columns: 118px minmax(180px, 1fr) 118px; gap: 12px; align-items: center; margin-top: 12px; padding: 10px; }
       .beat-position { display: flex; justify-content: center; align-items: baseline; gap: 12px; }
       .beat-position strong { font-size: 19px; }
@@ -89,6 +91,8 @@
         <div class="upload-actions">
           <label class="file-picker">Upload Score<input id="file" type="file" accept=".pdf,.musicxml,.xml,.mxl" /></label>
           <button id="sample">Load Sample</button>
+          <select id="saved-scores"><option value="">— Saved Scores —</option></select>
+          <button id="delete-score" style="display:none" title="Delete selected saved score">✕</button>
         </div>
       </section>
       <section class="beat-navigator">
@@ -137,6 +141,85 @@
       </div>
     </main>
     <script>
+      // ── IndexedDB score storage ──
+      function openScoreDB() {
+        return new Promise((resolve, reject) => {
+          const req = indexedDB.open("accordion-scores", 1);
+          req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains("scores")) {
+              const store = db.createObjectStore("scores", { keyPath: "id", autoIncrement: true });
+              store.createIndex("name", "name", { unique: false });
+            }
+          };
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+      }
+      async function saveScore(name, xml) {
+        const db = await openScoreDB();
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction("scores", "readwrite");
+          const store = tx.objectStore("scores");
+          const idx = store.index("name");
+          const lookup = idx.getAll(name);
+          lookup.onsuccess = () => {
+            const existing = lookup.result;
+            if (existing.length) {
+              existing[0].xml = xml;
+              existing[0].savedAt = Date.now();
+              store.put(existing[0]);
+            } else {
+              store.add({ name, xml, savedAt: Date.now() });
+            }
+          };
+          tx.oncomplete = () => { db.close(); resolve(); };
+          tx.onerror = () => { db.close(); reject(tx.error); };
+        });
+      }
+      async function listScores() {
+        const db = await openScoreDB();
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction("scores", "readonly");
+          const req = tx.objectStore("scores").getAll();
+          req.onsuccess = () => {
+            db.close();
+            resolve(req.result.map(r => ({ id: r.id, name: r.name, savedAt: r.savedAt })));
+          };
+          req.onerror = () => { db.close(); reject(req.error); };
+        });
+      }
+      async function loadScore(id) {
+        const db = await openScoreDB();
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction("scores", "readonly");
+          const req = tx.objectStore("scores").get(id);
+          req.onsuccess = () => { db.close(); resolve(req.result); };
+          req.onerror = () => { db.close(); reject(req.error); };
+        });
+      }
+      async function deleteScore(id) {
+        const db = await openScoreDB();
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction("scores", "readwrite");
+          tx.objectStore("scores").delete(id);
+          tx.oncomplete = () => { db.close(); resolve(); };
+          tx.onerror = () => { db.close(); reject(tx.error); };
+        });
+      }
+      async function populateSavedScores() {
+        const sel = $("saved-scores");
+        const scores = await listScores();
+        sel.innerHTML = '<option value="">— Saved Scores —</option>';
+        scores.sort((a, b) => b.savedAt - a.savedAt).forEach(s => {
+          const opt = document.createElement("option");
+          opt.value = s.id;
+          opt.textContent = s.name;
+          sel.appendChild(opt);
+        });
+        $("delete-score").style.display = "none";
+      }
+
       const roots = ["A#","D#","G#","C#","F#","B","E","A","D","G","C","F","Bb","Eb","Ab","Db","Gb","Cb","Fb","Bbb"];
       const rows = ["diminished","seventh","minor","major","bass","counterbass"];
       const rowNames = { diminished: "Dim", seventh: "7th", minor: "Minor", major: "Major", bass: "Bass", counterbass: "Counter" };
@@ -265,31 +348,47 @@
 
       function buildBeatOverlay() {
         if (!osmd || !events.length) return;
-        // 1. Collect cursor positions keyed by (measureNumber, beatInMeasure)
-        //    measureNumber is 1-based, beatInMeasure is the timestamp within the measure
-        //    converted to a 1-based beat number (quarter-note beats).
-        const posMap = new Map(); // key: "measure-beat" → {x, y, h}
+        // 1. Collect ALL cursor positions in sequential order
+        const cursorSeq = [];
         try {
           osmd.cursor.reset(); osmd.cursor.show();
           while (!osmd.cursor.iterator.EndReached) {
-            const mIdx = osmd.cursor.iterator.currentMeasureIndex; // 0-based
-            const mNum = mIdx + 1; // 1-based to match events
-            const beatInMeasure = Math.round(osmd.cursor.iterator.currentTimeStamp.realValue * 4) + 1; // quarter-note beat, 1-based
             const el = osmd.cursor.cursorElement;
-            const key = mNum + "-" + beatInMeasure;
-            if (!posMap.has(key)) {
-              posMap.set(key, {
-                x: parseFloat(el.style.left) || 0,
-                y: parseFloat(el.style.top) || 0,
-                h: parseFloat(el.style.height) || el.offsetHeight || 60
-              });
-            }
+            const mIdx = osmd.cursor.iterator.currentMeasureIndex;
+            const tsInMeasure = osmd.cursor.iterator.currentTimeStamp.realValue;
+            cursorSeq.push({
+              mIdx,
+              tsInMeasure,
+              x: parseFloat(el.style.left) || 0,
+              y: parseFloat(el.style.top) || 0,
+              h: parseFloat(el.style.height) || el.offsetHeight || 60
+            });
             osmd.cursor.next();
           }
           osmd.cursor.hide();
         } catch (_) {}
-        console.log("[Overlay] posMap size:", posMap.size, "events:", events.length,
-          "sample keys:", [...posMap.keys()].slice(0, 10).join(", "));
+        console.log("[Overlay] cursor positions:", cursorSeq.length, "events:", events.length);
+
+        // 2. Build a map from measureNumber → list of cursor positions in that measure
+        //    Use the XML measure numbers from events to figure out the mIdx→measureNumber mapping
+        const mIdxToNum = new Map();
+        const seenMeasures = [...new Set(events.map(e => e.measureNumber))];
+        seenMeasures.forEach((mNum, i) => mIdxToNum.set(i, mNum));
+
+        // Build posMap keyed by "measureNumber-beatNumber"
+        const posMap = new Map();
+        for (const cp of cursorSeq) {
+          const mNum = mIdxToNum.get(cp.mIdx) ?? (cp.mIdx + 1);
+          // tsInMeasure is in whole notes; * 4 gives quarter-note index (0-based), +1 for 1-based
+          const beatFromQN = Math.round(cp.tsInMeasure * 4) + 1;
+          const key = mNum + "-" + beatFromQN;
+          if (!posMap.has(key)) {
+            posMap.set(key, { x: cp.x, y: cp.y, h: cp.h });
+          }
+        }
+        console.log("[Overlay] posMap size:", posMap.size,
+          "sample keys:", [...posMap.keys()].slice(0, 12).join(", "),
+          "event keys sample:", events.slice(0, 12).map(e => e.measureNumber + "-" + e.beatNumber).join(", "));
 
         // 2. Map each event to a cursor position by (measureNumber, beatNumber)
         const hasReal = [];
@@ -419,18 +518,20 @@
             Array.from(measure.children).forEach((child, childIndex) => {
               if (child.localName === "backup") { cursor -= asNumber(textOf(child, "duration"), 0); return; }
               if (child.localName === "forward") { cursor += asNumber(textOf(child, "duration"), 0); return; }
-              if (child.localName === "harmony") {
+              if (child.localName === "harmony" && partIndex === 0) {
                 chordsByBeat.set(measureStart + Math.floor(cursor / divisions), harmonyRaw(child));
                 return;
               }
-              if (child.localName === "direction") {
+              if (child.localName === "direction" && partIndex === 0) {
                 const chord = chordFromText(textForChordScan(child));
                 if (chord) chordsByBeat.set(measureStart + Math.floor(cursor / divisions), chord);
                 return;
               }
               if (child.localName !== "note") return;
-              const lyricChord = chordFromText(textForChordScan(child));
-              if (lyricChord) chordsByBeat.set(measureStart + Math.floor(cursor / divisions), lyricChord);
+              if (partIndex === 0) {
+                const lyricChord = chordFromText(textForChordScan(child));
+                if (lyricChord) chordsByBeat.set(measureStart + Math.floor(cursor / divisions), lyricChord);
+              }
               const duration = asNumber(textOf(child, "duration"), divisions);
               const isChordTone = Boolean(child.querySelector("chord"));
               const start = isChordTone ? lastNoteStart : cursor;
@@ -739,7 +840,11 @@
               stopAutoplay();
               events = parsed.events;
               index = 0;
-              if (parsed.xmlText) loadScoreIntoOSMD(parsed.xmlText);
+              if (parsed.xmlText) {
+                loadScoreIntoOSMD(parsed.xmlText);
+                const scoreName = file.name.replace(/\.[^.]+$/, "");
+                saveScore(scoreName, parsed.xmlText).then(populateSavedScores).catch(() => {});
+              }
             }
             globalWarnings = parsed.warnings;
           } catch {
@@ -760,6 +865,8 @@
             index = 0;
             globalWarnings = [`MusicXML loaded: ${file.name}`, ...parsed.warnings];
             loadScoreIntoOSMD(xmlText);
+            const scoreName = file.name.replace(/\.[^.]+$/, "");
+            saveScore(scoreName, xmlText).then(populateSavedScores).catch(() => {});
           } else {
             globalWarnings = parsed.warnings;
           }
@@ -767,6 +874,36 @@
         };
         reader.readAsText(file);
       };
+      $("saved-scores").onchange = async () => {
+        const id = parseInt($("saved-scores").value);
+        if (!id) { $("delete-score").style.display = "none"; return; }
+        $("delete-score").style.display = "";
+        try {
+          const record = await loadScore(id);
+          if (!record) return;
+          const parsed = parseMusicXml(record.xml);
+          if (parsed.events.length) {
+            stopAutoplay();
+            events = parsed.events;
+            index = 0;
+            globalWarnings = [`Loaded: ${record.name}`, ...parsed.warnings];
+            loadScoreIntoOSMD(record.xml);
+          } else {
+            globalWarnings = parsed.warnings;
+          }
+          render();
+        } catch (err) {
+          globalWarnings = ["Failed to load saved score: " + err.message];
+          render();
+        }
+      };
+      $("delete-score").onclick = async () => {
+        const id = parseInt($("saved-scores").value);
+        if (!id) return;
+        await deleteScore(id);
+        await populateSavedScores();
+      };
+      populateSavedScores();
       render();
     </script>
   </body>
