@@ -12,7 +12,7 @@
       button:hover, .file-picker:hover { background: #e8f5f3; }
       button:disabled { cursor: not-allowed; opacity: .42; }
       input[type=file] { display: none; }
-      .upload-panel, .beat-navigator, .score-viewer, .beat-info { border: 1px solid #d8d8cf; background: #fffefb; border-radius: 8px; }
+      .upload-panel, .beat-navigator, .beat-info { border: 1px solid #d8d8cf; background: #fffefb; border-radius: 8px; }
       .upload-panel { display: flex; justify-content: space-between; gap: 14px; padding: 14px 16px; align-items: center; }
       h1 { margin: 0 0 4px; font-size: 24px; letter-spacing: 0; }
       p { margin: 0; color: #59625d; }
@@ -20,20 +20,34 @@
       .beat-navigator { display: grid; grid-template-columns: 118px minmax(180px, 1fr) 118px; gap: 12px; align-items: center; margin-top: 12px; padding: 10px; }
       .beat-position { display: flex; justify-content: center; align-items: baseline; gap: 12px; }
       .beat-position strong { font-size: 19px; }
-      .workspace-grid { display: grid; grid-template-columns: minmax(250px, .8fr) minmax(470px, 1.15fr) minmax(230px, .6fr); gap: 14px; margin-top: 14px; align-items: start; }
-      .score-viewer, .beat-info { padding: 12px; }
-      .score-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 10px; }
-      .score-header h2, .beat-info h2 { margin: 0; font-size: 18px; }
-      .beat-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 7px; max-height: 540px; overflow: auto; }
-      .beat-strip button { min-height: 34px; padding: 0 8px; }
-      .beat-strip button.is-selected { background: #ffd166; border-color: #a66a00; color: #332100; }
-      .accordion-diagram { display: grid; grid-template-columns: 264px 78px 92px; justify-content: center; gap: 12px; min-height: 620px; padding: 16px; border-radius: 8px; background: linear-gradient(90deg, #263239, #354246 48%, #293136); border: 1px solid #1b2528; }
+      .main-grid { display: grid; grid-template-columns: 620px 1fr; gap: 14px; margin-top: 14px; align-items: start; }
+      .left-column { display: flex; flex-direction: column; gap: 12px; }
+      .score-panel { border: 1px solid #d8d8cf; background: #fffefb; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+      .score-panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+      .score-panel-header h2 { margin: 0; font-size: 18px; }
+      #score-wrap { position: relative; overflow: auto; flex: 1; min-height: 0; border: 1px solid #e8e5dc; border-radius: 5px; background: #fff; }
+      #score-osmd { width: 100%; position: relative; }
+      #score-overlay { position: absolute; top: 0; left: 0; pointer-events: none; overflow: visible; }
+      #score-highlight { position: absolute; pointer-events: none; background: rgba(218,165,32,0.38); border: 2px solid #b8860b; border-radius: 3px; display: none; z-index: 4; }
+      .beat-overlay-btn { position: absolute; cursor: pointer; background: transparent; border: none; padding: 0; z-index: 3; pointer-events: all; }
+      .beat-overlay-btn:hover { background: rgba(73,198,163,0.13); }
+      #score-placeholder { color: #667069; padding: 20px 16px; margin: 0; }
+      .beat-info { padding: 10px 12px; font-size: 13px; }
+      .beat-info h3 { margin: 0 0 6px; font-size: 14px; font-weight: 800; color: #49524d; text-transform: uppercase; letter-spacing: .03em; }
+      .beat-info dl { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; margin: 0; }
+      .beat-info dl div { border-top: 1px solid #ebe8dd; padding-top: 6px; }
+      .warnings-panel { padding: 8px 12px; border: 1px solid #e4bd5a; background: #fff4d7; border-radius: 8px; font-size: 12px; }
+      .warnings-panel h4 { margin: 0 0 4px; font-size: 12px; font-weight: 800; }
+      .warnings-panel ul { margin: 0; padding-left: 16px; }
+      .warnings-panel li { margin: 2px 0; }
+      .accordion-diagram { display: grid; grid-template-columns: 340px 96px 118px; justify-content: center; gap: 14px; min-height: 760px; padding: 18px; border-radius: 8px; background: linear-gradient(90deg, #263239, #354246 48%, #293136); border: 1px solid #1b2528; }
       .instrument-panel { background: #f8f8f2; border: 1px solid #bfc5bd; border-radius: 7px; padding: 10px; overflow: hidden; display: flex; justify-content: center; align-items: center; }
       .bellows { display: flex; flex-direction: column; justify-content: stretch; gap: 8px; padding: 4px 0; }
       .bellows span { flex: 1; background: #e7d9b9; border-left: 8px solid #b94d45; border-right: 8px solid #b94d45; clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
-      svg { width: 100%; max-height: 590px; }
-      #bass { max-width: 236px; }
-      #piano { max-width: 70px; }
+      .accordion-diagram svg { width: 100%; max-height: 720px; }
+      #score-osmd svg { display: block; max-height: none; }
+      #bass { max-width: 310px; }
+      #piano { max-width: 90px; }
       .piano-key { stroke: #111816; stroke-width: .8; }
       .piano-key-white { fill: #fffdf5; }
       .piano-key-black { fill: #1e2527; }
@@ -63,6 +77,7 @@
       @media (max-width: 1100px) { .workspace-grid { grid-template-columns: 1fr; } .accordion-diagram { grid-template-columns: 264px 78px 92px; } }
       @media (max-width: 560px) { body { padding: 10px; } .upload-panel, .beat-navigator, .accordion-diagram { display: flex; flex-direction: column; } .bellows { display: none; } }
     </style>
+  <script src="https://unpkg.com/opensheetmusicdisplay@1.9.2/build/opensheetmusicdisplay.min.js"></script>
   </head>
   <body>
     <main>
@@ -96,21 +111,29 @@
           <input type="checkbox" id="basssound" style="width:15px;height:15px;accent-color:#2f5f65;cursor:pointer"> Bass sound
         </label>
       </div>
-      <div class="workspace-grid">
-        <section class="score-viewer">
-          <div class="score-header"><h2>Score</h2><span id="score-position"></span></div>
-          <div id="beat-strip" class="beat-strip"></div>
-        </section>
-        <section class="accordion-diagram">
-          <div class="instrument-panel"><svg id="bass" viewBox="-18 0 225 672"></svg></div>
-          <div class="bellows"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
-          <div class="instrument-panel"><svg id="piano" viewBox="0 0 54 528"></svg></div>
-        </section>
-        <aside class="beat-info">
-          <h2>Current Beat</h2>
-          <dl id="info"></dl>
+      <div class="main-grid">
+        <div class="left-column">
+          <section class="accordion-diagram">
+            <div class="instrument-panel"><svg id="bass" viewBox="-18 0 225 672"></svg></div>
+            <div class="bellows"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+            <div class="instrument-panel"><svg id="piano" viewBox="0 0 54 528"></svg></div>
+          </section>
+          <aside class="beat-info" style="border:1px solid #d8d8cf;background:#fffefb;border-radius:8px;">
+            <h3>Current Beat</h3>
+            <dl id="info"></dl>
+          </aside>
           <div id="warnings"></div>
-        </aside>
+        </div>
+        <section class="score-panel">
+          <div class="score-panel-header"><h2>Score</h2><span id="score-position"></span></div>
+          <div id="score-wrap">
+            <div id="score-osmd"></div>
+            <div id="score-overlay">
+              <div id="score-highlight"></div>
+            </div>
+          </div>
+          <p id="score-placeholder">Load a sample or upload a score to see it here.</p>
+        </section>
       </div>
     </main>
     <script>
@@ -168,6 +191,178 @@
         buildBeat("m2-b4", 2, 4, [note("fs4h","F#4",1,true)], "Bbdim", 4)
       ];
       let events = sampleEvents;
+      const SAMPLE_XML = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.1 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="3.1">
+  <part-list><score-part id="P1"><part-name>Accordion Right Hand</part-name></score-part></part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes><divisions>1</divisions><key><fifths>0</fifths></key><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>
+      <harmony><root><root-step>C</root-step></root><kind text="C">major</kind></harmony>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><type>half</type></note>
+      <note><chord/><pitch><step>E</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>
+      <note><chord/><pitch><step>G</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>
+      <note><pitch><step>D</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>
+      <harmony><root><root-step>D</root-step></root><kind text="Dm">minor</kind></harmony>
+      <note><pitch><step>F</step><octave>4</octave></pitch><duration>2</duration><type>half</type></note>
+      <note><chord/><pitch><step>A</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>
+    </measure>
+    <measure number="2">
+      <harmony><root><root-step>G</root-step></root><kind text="G7">dominant</kind></harmony>
+      <note><pitch><step>E</step><octave>5</octave></pitch><duration>1</duration><type>quarter</type></note>
+      <note><pitch><step>G</step><octave>5</octave></pitch><duration>1</duration><type>quarter</type></note>
+      <harmony><root><root-step>B</root-step><root-alter>-1</root-alter></root><kind text="Bbdim">diminished</kind></harmony>
+      <note><pitch><step>F</step><alter>1</alter><octave>4</octave></pitch><duration>2</duration><type>half</type></note>
+    </measure>
+  </part>
+</score-partwise>`;
+
+      // ── OSMD score viewer ──────────────────────────────────────────────
+      let osmd = null;
+      let beatOverlayX = [];
+      let beatOverlayY = [];
+      let beatOverlayH = [];
+      let beatOverlayW = [];
+
+      function initOSMD() {
+        if (osmd) return;
+        osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay("score-osmd", {
+          autoResize: false, drawTitle: false, drawPartNames: false,
+          drawingParameters: "compact"
+        });
+      }
+
+      async function loadScoreIntoOSMD(xmlString) {
+        initOSMD();
+        $("score-placeholder").style.display = "none";
+        try {
+          await osmd.load(xmlString);
+          osmd.render();
+          await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+          // Zoom to fill container width
+          const svgEl = $("score-osmd").querySelector("svg");
+          if (svgEl) {
+            const svgPx = svgEl.getBoundingClientRect().width;
+            const wrapPx = $("score-wrap").clientWidth - 2;
+            if (svgPx > 10 && wrapPx > svgPx + 20) {
+              osmd.zoom = (osmd.zoom || 1) * (wrapPx / svgPx);
+              osmd.render();
+              await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+            }
+          }
+          buildBeatOverlay();
+          // Match score panel height to left column (accordion + beat-info)
+          const leftCol = document.querySelector(".left-column");
+          const scorePanel = document.querySelector(".score-panel");
+          if (leftCol && scorePanel) {
+            scorePanel.style.height = leftCol.offsetHeight + "px";
+          }
+        } catch (e) {
+          $("score-placeholder").textContent = "Score display failed: " + e.message;
+          $("score-placeholder").style.display = "";
+        }
+      }
+
+      function buildBeatOverlay() {
+        if (!osmd || !events.length) return;
+        // 1. Collect cursor positions keyed by (measureNumber, beatInMeasure)
+        //    measureNumber is 1-based, beatInMeasure is the timestamp within the measure
+        //    converted to a 1-based beat number (quarter-note beats).
+        const posMap = new Map(); // key: "measure-beat" → {x, y, h}
+        try {
+          osmd.cursor.reset(); osmd.cursor.show();
+          while (!osmd.cursor.iterator.EndReached) {
+            const mIdx = osmd.cursor.iterator.currentMeasureIndex; // 0-based
+            const mNum = mIdx + 1; // 1-based to match events
+            const beatInMeasure = Math.round(osmd.cursor.iterator.currentTimeStamp.realValue * 4) + 1; // quarter-note beat, 1-based
+            const el = osmd.cursor.cursorElement;
+            const key = mNum + "-" + beatInMeasure;
+            if (!posMap.has(key)) {
+              posMap.set(key, {
+                x: parseFloat(el.style.left) || 0,
+                y: parseFloat(el.style.top) || 0,
+                h: parseFloat(el.style.height) || el.offsetHeight || 60
+              });
+            }
+            osmd.cursor.next();
+          }
+          osmd.cursor.hide();
+        } catch (_) {}
+        console.log("[Overlay] posMap size:", posMap.size, "events:", events.length,
+          "sample keys:", [...posMap.keys()].slice(0, 10).join(", "));
+
+        // 2. Map each event to a cursor position by (measureNumber, beatNumber)
+        const hasReal = [];
+        let lastPos = { x: 0, y: 0, h: 60 };
+        const positions = events.map(e => {
+          const key = e.measureNumber + "-" + e.beatNumber;
+          const pos = posMap.get(key) ?? null;
+          hasReal.push(pos !== null);
+          if (pos !== null) lastPos = pos;
+          return pos !== null ? pos : { ...lastPos };
+        });
+
+        // 3. Interpolate x for fallback beats on the same row
+        for (let i = 0; i < positions.length; i++) {
+          if (hasReal[i]) continue;
+          let lo = i - 1; while (lo >= 0 && !hasReal[lo]) lo--;
+          let hi = i + 1; while (hi < positions.length && !hasReal[hi]) hi++;
+          if (lo >= 0 && hi < positions.length && positions[lo].y === positions[hi].y) {
+            const frac = (i - lo) / (hi - lo);
+            positions[i] = {
+              x: positions[lo].x + (positions[hi].x - positions[lo].x) * frac,
+              y: positions[lo].y,
+              h: positions[lo].h
+            };
+          }
+        }
+        beatOverlayX = positions.map(p => p.x);
+        beatOverlayY = positions.map(p => p.y);
+        beatOverlayH = positions.map(p => p.h);
+        // Width = gap to next beat on same row; at row break or last beat use 56px
+        beatOverlayW = beatOverlayX.map((x, i) => {
+          if (i + 1 < beatOverlayX.length && beatOverlayY[i + 1] === beatOverlayY[i])
+            return Math.max(10, beatOverlayX[i + 1] - x);
+          return 56;
+        });
+        // Render overlay buttons inside score-overlay (OSMD never touches it)
+        const overlay = $("score-overlay");
+        overlay.querySelectorAll(".beat-overlay-btn").forEach(el => el.remove());
+        // Set overlay height to match score-osmd so buttons at the bottom are reachable
+        overlay.style.height = $("score-osmd").offsetHeight + "px";
+        events.forEach((ev, i) => {
+          const btn = document.createElement("button");
+          btn.className = "beat-overlay-btn";
+          btn.style.left   = beatOverlayX[i] + "px";
+          btn.style.top    = beatOverlayY[i] + "px";
+          btn.style.width  = beatOverlayW[i] + "px";
+          btn.style.height = beatOverlayH[i] + "px";
+          btn.title = `M${ev.measureNumber} B${ev.beatNumber}`;
+          btn.onclick = () => { stopAutoplay(); index = i; render(); };
+          overlay.appendChild(btn);
+        });
+        updateScoreHighlight();
+      }
+
+      let lastHlY = -1;
+      function updateScoreHighlight() {
+        const hl = $("score-highlight");
+        if (!beatOverlayX.length) { hl.style.display = "none"; return; }
+        const newY = beatOverlayY[index];
+        const sameRow = Math.abs(newY - lastHlY) < 5;
+        hl.style.transition = sameRow ? "left 0.12s ease" : "none";
+        hl.style.display = "block";
+        hl.style.left   = beatOverlayX[index] + "px";
+        hl.style.top    = newY + "px";
+        hl.style.width  = beatOverlayW[index] + "px";
+        hl.style.height = beatOverlayH[index] + "px";
+        lastHlY = newY;
+        // Smooth scroll so current staff line stays near the top
+        const wrap = $("score-wrap");
+        const targetScroll = Math.max(0, newY - 16);
+        wrap.scrollTo({ top: targetScroll, behavior: "smooth" });
+      }
+      // ──────────────────────────────────────────────────────────────────
       let index = 0;
       let globalWarnings = [];
       function pitchName(pitchEl) {
@@ -406,10 +601,7 @@
         $("score-position").textContent = `Measure ${beat.measureNumber}, ${beatLabel}`;
         $("prev").disabled = index === 0;
         $("next").disabled = index === events.length - 1;
-        $("beat-strip").innerHTML = events.map((b, i) =>
-          `<button class="${i === index ? "is-selected" : ""}" data-i="${i}">M${b.measureNumber} B${b.beatNumber}</button>`
-        ).join("");
-        $("beat-strip").querySelectorAll("button").forEach(btn => btn.onclick = () => { index = Number(btn.dataset.i); render(); });
+        updateScoreHighlight();
         animateOnsets(beat, 0);
         renderBass(beat);
         if (bassSound) playBassButtonSound(beat);
@@ -419,7 +611,7 @@
         const posLabel = `Measure ${beat.measureNumber}, ${beatLabel} / ${beat.beatsPerMeasure ?? 4}`;
         $("info").innerHTML = `<div><dt>Position</dt><dd>${posLabel}</dd></div><div><dt>Chord</dt><dd>${beat.chordSymbol?.raw || "None"}</dd></div><div><dt>Left Hand</dt><dd><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:700;background:${actionColor};color:#1a2420">${actionLabel}</span>${btn ? ` <strong>${btn.label}</strong>` : ""}</dd></div><div><dt>Right Hand</dt><dd>${beat.activeRightHandNotes.map(n => n.pitch.name + (n.isSustained ? " (held)" : "")).join(", ") || "Rest"}</dd></div>`;
         const warnings = globalWarnings.concat(beat.warnings);
-        $("warnings").innerHTML = warnings.length ? `<div class="warnings"><h3>Warnings</h3><ul>${warnings.map(w => `<li>${w}</li>`).join("")}</ul></div>` : "";
+        $("warnings").innerHTML = warnings.length ? `<div class="warnings-panel"><h4>Warnings</h4><ul>${warnings.map(w => `<li>${w}</li>`).join("")}</ul></div>` : "";
       }
       // ── Autoplay / Metronome ───────────────────────────────────────────
       let bpm = 80;
@@ -516,7 +708,7 @@
         else if (e.key === "Home") { e.preventDefault(); stopAutoplay(); index = 0; render(); }
         else if (e.key === "End") { e.preventDefault(); stopAutoplay(); index = events.length - 1; render(); }
       });
-      $("sample").onclick = () => { stopAutoplay(); events = sampleEvents; globalWarnings = []; index = 0; render(); };
+      $("sample").onclick = () => { stopAutoplay(); events = sampleEvents; globalWarnings = []; index = 0; render(); loadScoreIntoOSMD(SAMPLE_XML); };
       async function convertPdf(file) {
         const body = new FormData();
         body.append("score", file);
@@ -524,16 +716,13 @@
         const result = await response.json();
         if (!response.ok || !result.musicXml) {
           return {
-            events: [],
-            warnings: [
-              ...(result.warnings || []),
-              result.details || result.error || "OMR conversion failed."
-            ]
+            events: [], xmlText: null,
+            warnings: [...(result.warnings || []), result.details || result.error || "OMR conversion failed."]
           };
         }
         const parsed = parseMusicXml(result.musicXml);
         return {
-          events: parsed.events,
+          events: parsed.events, xmlText: result.musicXml,
           warnings: [`PDF converted: ${file.name}`, ...(result.warnings || []), ...parsed.warnings]
         };
       }
@@ -550,6 +739,7 @@
               stopAutoplay();
               events = parsed.events;
               index = 0;
+              if (parsed.xmlText) loadScoreIntoOSMD(parsed.xmlText);
             }
             globalWarnings = parsed.warnings;
           } catch {
@@ -562,12 +752,14 @@
         if (!name.endsWith(".xml") && !name.endsWith(".musicxml")) { globalWarnings = ["Unsupported file type. Use .musicxml, .xml, .mxl, or .pdf."]; render(); return; }
         const reader = new FileReader();
         reader.onload = () => {
-          const parsed = parseMusicXml(String(reader.result || ""));
+          const xmlText = String(reader.result || "");
+          const parsed = parseMusicXml(xmlText);
           if (parsed.events.length) {
             stopAutoplay();
             events = parsed.events;
             index = 0;
             globalWarnings = [`MusicXML loaded: ${file.name}`, ...parsed.warnings];
+            loadScoreIntoOSMD(xmlText);
           } else {
             globalWarnings = parsed.warnings;
           }

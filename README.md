@@ -8,8 +8,12 @@ A beginner-friendly web app for **120-bass piano accordion** practice. Upload a 
 
 | Feature | Details |
 |---|---|
-| **Beat-by-beat navigation** | Arrow keys, Space, Prev/Next buttons, or click any beat in the strip |
-| **SVG accordion diagram** | Vertical piano keyboard (right hand) + full 120-bass Stradella grid (left hand) |
+| **Live score display** | Uploaded MusicXML is rendered as a full musical score using [OpenSheetMusicDisplay](https://opensheetmusicdisplay.org/) (OSMD). The score auto-zooms to fill the panel width |
+| **Score highlight bar** | A dark-gold sliding highlight follows the current beat across the rendered score. Moves smoothly within a staff line and jumps instantly between lines |
+| **Click-on-score navigation** | Click any beat directly on the rendered score to jump to it — transparent overlay buttons are positioned over each beat |
+| **Auto-scrolling score** | The score panel smoothly scrolls to keep the current staff line near the top as the music progresses |
+| **Beat-by-beat navigation** | Arrow keys, Space, Prev/Next buttons, or click any beat on the score |
+| **SVG accordion diagram** | Vertical piano keyboard (right hand) + full 120-bass Stradella grid (left hand), displayed to the left of the score |
 | **Bass / chord alternation** | Odd beats (1, 3) highlight the **bass note** button in green; even beats (2, 4) highlight the **chord button** in amber — never both at once |
 | **Autoplay metronome** | Plays a Web Audio click, advances beats automatically, stops at the last beat |
 | **BPM control** | Slider (20–200 BPM) + number input, both stay in sync. Default 80 BPM |
@@ -30,15 +34,19 @@ PDF  ──► OMR server (Audiveris)  ──► MusicXML
                                           │
 MusicXML ─────────────────────────────────┘
          │
-         ▼
-    parseMusicXml()
+         ├──► parseMusicXml()
+         │         │
+         │         ▼
+         │    BeatEvent[]  (one event per beat, per measure)
+         │         │
+         │         ▼
+         │    Accordion diagram  ──  piano keys highlighted
+         │                       ──  Stradella button highlighted
          │
-         ▼
-    BeatEvent[]   (one event per beat, per measure)
-         │
-         ▼
-    Accordion diagram  ──  piano keys highlighted
-                       ──  Stradella button highlighted (bass OR chord)
+         └──► OSMD score renderer
+                   │
+                   ▼
+              Rendered score with highlight bar + click overlay
 ```
 
 ### Beat Model (`BeatEvent`)
@@ -234,31 +242,52 @@ The server starts on `http://localhost:8787`. Keep this terminal open while usin
 
 ## How to Use
 
+### Layout
+
+The main view has two panels side by side:
+
+```
+┌──────────────────────────┐  ┌─────────────────────────────┐
+│   Accordion Schematic    │  │   Score Display              │
+│                          │  │                               │
+│  ┌──────┐ ╱╲ ┌───────┐  │  │  ♩ ♩ ♩ ♩ │ ♩ ♩ ♩ ♩ │       │
+│  │Strad.│╱  ╲│ Piano │  │  │  ▓▓▓▓ ← highlight bar       │
+│  │ grid │╲  ╱│ keys  │  │  │  ♩ ♩ ♩ ♩ │ ♩ ♩ ♩ ♩ │       │
+│  └──────┘ ╲╱ └───────┘  │  │                               │
+│                          │  │  (auto-scrolls as you play)  │
+│  ┌──────────────────┐   │  │                               │
+│  │  Current Beat    │   │  └─────────────────────────────┘
+│  │  info panel      │   │
+│  └──────────────────┘   │
+└──────────────────────────┘
+```
+
 ### Navigation
 
 | Action | Control |
 |---|---|
 | Next beat | `→` arrow key or **Next →** button |
 | Previous beat | `←` arrow key or **← Prev** button |
-| Jump to any beat | Click the beat in the score strip |
+| Jump to any beat | Click directly on the beat in the rendered score |
 | First beat | `Home` key |
 | Last beat | `End` key |
 | Toggle autoplay | `Space` key or **▶ Play** button |
 
 ### Reading the Accordion Diagram
 
-```
-┌─────────────────────┐  ╱╲  ┌──────────┐
-│   Stradella grid    │ ╱  ╲ │  Piano   │
-│   (left hand)       │ ╲  ╱ │  keys    │
-│                     │  ╲╱  │(right hd)│
-└─────────────────────┘       └──────────┘
-```
-
 - **Green button** = press the **bass note** (strong beat)
 - **Amber button** = press the **chord button** (weak beat)
 - **Yellow piano key** = press this piano key (right hand)
-- The **Current Beat** panel on the right shows the chord symbol, the exact button/key name, and whether it is a bass or chord beat.
+- The **Current Beat** panel below the diagram shows the chord symbol, the exact button/key name, and whether it is a bass or chord beat.
+
+### Score Display
+
+The rendered score shows the full notation of the uploaded MusicXML file. A **dark-gold highlight bar** tracks the current beat as you navigate or play:
+
+- **Within a staff line**: the bar slides smoothly to the next beat
+- **Between staff lines**: the bar jumps instantly to the new line
+- **Auto-scroll**: the score panel scrolls automatically to keep the active staff line near the top
+- **Click navigation**: click anywhere on the score to jump to that beat
 
 ### Autoplay / Metronome
 
