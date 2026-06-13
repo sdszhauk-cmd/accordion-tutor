@@ -22,6 +22,7 @@ A beginner-friendly web app for **120-bass piano accordion** practice. Upload a 
 | **Sub-beat note animation** | When a beat contains off-beat notes, they are highlighted one by one at the correct rhythmic interval based on the current BPM |
 | **PDF upload** | Converts PDF scores to MusicXML via a local Audiveris OMR server |
 | **MusicXML upload** | Parsed entirely in the browser — no server required |
+| **Saved score library** | Uploaded scores are automatically saved to IndexedDB and persist across page refreshes. Reload any previously uploaded score from the "Saved Scores" dropdown, or delete it with the ✕ button |
 | **Built-in sample score** | 2-measure demo (C → Dm → G7 → Bbdim) loads instantly |
 | **Warnings panel** | Unsupported chords, missing harmony tags, and parse issues reported inline |
 
@@ -310,19 +311,31 @@ Both toggles are in the autoplay bar and are **off by default**.
 
 | File type | What happens |
 |---|---|
-| `.musicxml` / `.xml` | Parsed in the browser instantly |
-| `.pdf` | Sent to the local OMR server → converted by Audiveris → parsed as MusicXML |
+| `.musicxml` / `.xml` | Parsed in the browser instantly. **Recommended** — most reliable for notes and chord symbols |
+| `.pdf` | Sent to the local OMR server → converted by Audiveris → parsed as MusicXML. See note below |
 | `.mxl` | Recognized but not yet supported (export as uncompressed `.musicxml`) |
+
+> **PDF quality note:** PDF conversion relies on Audiveris OMR, which can miss chord symbols, misread notes, or produce incomplete MusicXML — especially on scanned or low-resolution PDFs. For best results, use a proper `.musicxml` file instead. Many scores are available as MusicXML on [MuseScore.com](https://musescore.com) (export as uncompressed MusicXML). Alternatively, open the Audiveris output in [MuseScore](https://musescore.org/) (free), correct any errors, and re-export.
+
+### Saved Scores
+
+Uploaded scores are automatically saved to IndexedDB in the browser:
+
+- **Saved Scores dropdown** — select any previously uploaded score to reload it instantly
+- **Delete button (✕)** — remove a saved score from the library
+- The built-in sample is always available and is not saved to the library
+- Saved scores persist across page refreshes but are specific to the browser profile
 
 ---
 
 ## Known Limitations
 
-- Only the **first MusicXML part** is read as right-hand notes.
+- Only the **first MusicXML part** is read as right-hand notes and chord symbols.
 - Extended chords (`Cmaj7`, `C6`, `C9`, sus chords, slash chords) are not mapped to Stradella buttons and produce warnings.
 - Compressed `.mxl` archives are not decompressed in-browser.
-- PDF recognition quality depends on scan quality and Audiveris output.
+- **PDF → MusicXML conversion is lossy.** Audiveris OMR frequently misses chord symbols, misreads accidentals, or drops notes — especially on scanned or handwritten scores. Always prefer native `.musicxml` files when available.
 - The counterbass row is displayed on the Stradella grid but is never highlighted automatically.
+- Saved scores are stored in the browser's IndexedDB and do not sync across devices or browsers.
 
 ---
 

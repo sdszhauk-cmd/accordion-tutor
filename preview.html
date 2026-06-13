@@ -348,47 +348,47 @@
 
       function buildBeatOverlay() {
         if (!osmd || !events.length) return;
-        // 1. Collect ALL cursor positions in sequential order
-        const cursorSeq = [];
+        // Map OSMD measure indices to XML measure numbers from events
+        const xmlMeasureNums = [...new Set(events.map(e => e.measureNumber))];
+        // Walk OSMD cursor, collect positions keyed by "measureNum-beatNum"
+        const posMap = new Map();
         try {
           osmd.cursor.reset(); osmd.cursor.show();
+          let prevMIdx = -1, measureStartTs = 0;
           while (!osmd.cursor.iterator.EndReached) {
             const el = osmd.cursor.cursorElement;
             const mIdx = osmd.cursor.iterator.currentMeasureIndex;
-            const tsInMeasure = osmd.cursor.iterator.currentTimeStamp.realValue;
-            cursorSeq.push({
-              mIdx,
-              tsInMeasure,
-              x: parseFloat(el.style.left) || 0,
-              y: parseFloat(el.style.top) || 0,
-              h: parseFloat(el.style.height) || el.offsetHeight || 60
-            });
+            const globalTs = osmd.cursor.iterator.currentTimeStamp.realValue;
+            // Detect measure boundary and record the start timestamp
+            if (mIdx !== prevMIdx) {
+              measureStartTs = globalTs;
+              prevMIdx = mIdx;
+            }
+            // Local timestamp within this measure (whole notes)
+            const localTs = globalTs - measureStartTs;
+            // Convert to 1-based quarter-note beat number
+            const beatNum = Math.floor(localTs * 4 + 0.01) + 1;
+            // Map mIdx to the actual XML measure number
+            const mNum = mIdx < xmlMeasureNums.length ? xmlMeasureNums[mIdx] : mIdx;
+            const key = mNum + "-" + beatNum;
+            if (!posMap.has(key)) {
+              posMap.set(key, {
+                x: parseFloat(el.style.left) || 0,
+                y: parseFloat(el.style.top) || 0,
+                h: parseFloat(el.style.height) || el.offsetHeight || 60
+              });
+            }
             osmd.cursor.next();
           }
           osmd.cursor.hide();
         } catch (_) {}
-        console.log("[Overlay] cursor positions:", cursorSeq.length, "events:", events.length);
-
-        // 2. Build a map from measureNumber → list of cursor positions in that measure
-        //    Use the XML measure numbers from events to figure out the mIdx→measureNumber mapping
-        const mIdxToNum = new Map();
-        const seenMeasures = [...new Set(events.map(e => e.measureNumber))];
-        seenMeasures.forEach((mNum, i) => mIdxToNum.set(i, mNum));
-
-        // Build posMap keyed by "measureNumber-beatNumber"
-        const posMap = new Map();
-        for (const cp of cursorSeq) {
-          const mNum = mIdxToNum.get(cp.mIdx) ?? (cp.mIdx + 1);
-          // tsInMeasure is in whole notes; * 4 gives quarter-note index (0-based), +1 for 1-based
-          const beatFromQN = Math.round(cp.tsInMeasure * 4) + 1;
-          const key = mNum + "-" + beatFromQN;
-          if (!posMap.has(key)) {
-            posMap.set(key, { x: cp.x, y: cp.y, h: cp.h });
-          }
-        }
-        console.log("[Overlay] posMap size:", posMap.size,
-          "sample keys:", [...posMap.keys()].slice(0, 12).join(", "),
-          "event keys sample:", events.slice(0, 12).map(e => e.measureNumber + "-" + e.beatNumber).join(", "));
+        // Log for debugging: compare cursor keys vs event keys
+        const evKeys = events.slice(0, 16).map(e => e.measureNumber + "-" + e.beatNumber);
+        const mapKeys = [...posMap.keys()].slice(0, 16);
+        console.log("[Overlay] posMap:", posMap.size, "keys:", mapKeys.join(", "));
+        console.log("[Overlay] events:", events.length, "keys:", evKeys.join(", "));
+        const matched = events.filter(e => posMap.has(e.measureNumber + "-" + e.beatNumber)).length;
+        console.log("[Overlay] matched:", matched, "/", events.length);
 
         // 2. Map each event to a cursor position by (measureNumber, beatNumber)
         const hasReal = [];
@@ -573,6 +573,9 @@
           }
         });
         if (!parsedEvents.length) warnings.push("No beat events could be extracted from this MusicXML file.");
+        console.log("[Parse] parts:", parts.length, "measures:", measures.length, "notes:", notes.length, "chords:", chordsByBeat.size);
+        console.log("[Parse] chordsByBeat:", [...chordsByBeat.entries()].slice(0, 20).map(([k,v]) => k + "=" + v).join(", "));
+        console.log("[Parse] first 12 events:", parsedEvents.slice(0, 12).map(e => `M${e.measureNumber}B${e.beatNumber}:${e.chordSymbol?.raw || "none"}[${e.activeRightHandNotes.length}n]`).join(", "));
         return { events: parsedEvents, warnings };
       }
       function renderPiano(active) {
