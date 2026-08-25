@@ -19,6 +19,12 @@
       .upload-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
       #saved-scores { height: 36px; padding: 0 10px; font-size: 13px; font-weight: 600; border-radius: 6px; border: 1px solid #bfc5bd; background: #fff; color: #2a3a2e; cursor: pointer; min-width: 160px; }
       #delete-score { height: 36px; width: 36px; padding: 0; font-size: 16px; font-weight: 700; border-radius: 6px; border: 1px solid #d4a0a0; background: #fff0f0; color: #a33; cursor: pointer; }
+      #melody-part { height: 36px; padding: 0 10px; font-size: 13px; font-weight: 600; border-radius: 6px; border: 1px solid #bfc5bd; background: #fff; color: #2a3a2e; cursor: pointer; max-width: 220px; }
+      .chord-entry { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 10px 14px; border: 1px solid #d8d8cf; background: #fffefb; border-radius: 8px; }
+      .chord-entry > label { font-size: 13px; font-weight: 700; color: #49524d; white-space: nowrap; }
+      #chord-input { flex: 1; min-width: 0; height: 34px; padding: 0 10px; font: inherit; font-size: 13px; border: 1px solid #bfc5bd; border-radius: 6px; background: #fff; color: #2a3a2e; }
+      .chord-entry button { height: 34px; }
+      .chord-approx { color: #7a6a2a; font-weight: 700; margin-left: 6px; }
       .beat-navigator { display: grid; grid-template-columns: 118px minmax(180px, 1fr) 118px; gap: 12px; align-items: center; margin-top: 12px; padding: 10px; }
       .beat-position { display: flex; justify-content: center; align-items: baseline; gap: 12px; }
       .beat-position strong { font-size: 19px; }
@@ -93,7 +99,14 @@
           <button id="sample">Load Sample</button>
           <select id="saved-scores"><option value="">— Saved Scores —</option></select>
           <button id="delete-score" style="display:none" title="Delete selected saved score">✕</button>
+          <select id="melody-part" style="display:none" title="Which MusicXML part holds the melody"></select>
         </div>
+      </section>
+      <section class="chord-entry">
+        <label for="chord-input">Chords</label>
+        <input id="chord-input" type="text" spellcheck="false" placeholder="Override by measure, one group per bar:  Am | Am | Dm E7 | Am   (use - to hold the previous chord)">
+        <button id="chord-apply">Apply</button>
+        <button id="chord-clear">Clear</button>
       </section>
       <section class="beat-navigator">
         <button id="prev">← Prev</button>
@@ -124,7 +137,12 @@
           </section>
           <aside class="beat-info" style="border:1px solid #d8d8cf;background:#fffefb;border-radius:8px;">
             <h3>Current Beat</h3>
-            <dl id="info"></dl>
+            <dl id="info">
+              <div><dt>Position</dt><dd id="info-position"></dd></div>
+              <div><dt>Chord</dt><dd id="info-chord"></dd></div>
+              <div><dt>Left Hand</dt><dd id="info-lefthand"></dd></div>
+              <div><dt>Right Hand</dt><dd id="info-righthand"></dd></div>
+            </dl>
           </aside>
           <div id="warnings"></div>
         </div>
@@ -220,6 +238,9 @@
         $("delete-score").style.display = "none";
       }
 
+      const DEBUG = /[?&]debug=1/.test(location.search);
+      const NOTE_SEMITONES = { C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11,Cb:11,Fb:4,Bbb:10,"E#":5,"B#":0,Cx:2,Dx:4,Fx:7,Gx:9,Ax:11,Abb:7,Dbb:0,Ebb:2,Gbb:5 };
+      const CHORD_INTERVALS = { bass: [0], major: [0, 4, 7], minor: [0, 3, 7], seventh: [0, 4, 7, 10], diminished: [0, 3, 6] };
       const roots = ["A#","D#","G#","C#","F#","B","E","A","D","G","C","F","Bb","Eb","Ab","Db","Gb","Cb","Fb","Bbb"];
       const rows = ["diminished","seventh","minor","major","bass","counterbass"];
       const rowNames = { diminished: "Dim", seventh: "7th", minor: "Minor", major: "Major", bass: "Bass", counterbass: "Counter" };
@@ -234,25 +255,80 @@
       const asNumber = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
       const pitch = name => ({ name });
       const note = (id, name, duration, held = false) => ({ id, pitch: pitch(name), durationBeats: duration, isSustained: held });
+      // ── Chord symbol → Stradella bass reduction ────────────────────
+      // A Stradella board only has major / minor / dominant-7 / diminished
+      // rows, so richer symbols are reduced to the closest playable button.
+      // `approx` is true when the reduction dropped something, which lets the
+      // UI show "Cmaj7 → C" instead of calling the chord unsupported.
+      const SEMITONE_TO_ROOT = { 0:"C",1:"C#",2:"D",3:"Eb",4:"E",5:"F",6:"F#",7:"G",8:"Ab",9:"A",10:"Bb",11:"B" };
+      const normalizeRoot = root => {
+        if (roots.includes(root)) return root;
+        const semi = NOTE_SEMITONES[root];
+        return semi === undefined ? "" : SEMITONE_TO_ROOT[semi];
+      };
+      const normalizeChordSuffix = raw => String(raw || "")
+        .replace(/[△Δ∆]/g, "maj7")
+        .replace(/[øØ]/g, "m7b5")
+        .replace(/[°º˚]/g, "dim")
+        .replace(/[–—]/g, "-")
+        .replace(/[()\s]/g, "");
+      // Ordered; first match wins. [suffix pattern, Stradella row, approximated?]
+      const CHORD_QUALITY_RULES = [
+        [/^$/,                                          "major",      false],
+        [/^(maj|major|Maj|M)$/,                         "major",      false],
+        [/^(m|mi|min|minor|-)$/,                        "minor",      false],
+        [/^7$/,                                         "seventh",    false],
+        [/^(dim|dim7|o7)$/,                             "diminished", false],
+        [/^(m|mi|min|-)?7b5$/,                          "diminished", true ],
+        [/^(m|mi|min|-)(6|7|9|11|13|maj7|Maj7|M7|add\d*|b5|#5|sus\d*)/, "minor", true ],
+        [/^(maj|Maj|M)(7|9|11|13)/,                     "major",      true ],
+        [/^(6|69|6\/9|add\d*|2|4|5)$/,                  "major",      true ],
+        [/^sus\d*$/,                                    "major",      true ],
+        [/^(aug|\+)$/,                                  "major",      true ],
+        [/^(aug7|\+7|7#5)/,                             "seventh",    true ],
+        [/^(9|11|13|7sus\d*|7b9|7#9|7b5|7#11|7b13|alt|7alt)/, "seventh", true ]
+      ];
       const parseChordQuality = raw => {
-        const match = raw.match(/^([A-G](?:#|b)?)(.*)$/);
-        if (!match) return { root: raw, quality: "unknown" };
-        const suffix = match[2].trim();
-        const quality = suffix === "" || /^maj(or)?$/i.test(suffix) ? "major" : /^(m|min|-)$/.test(suffix) ? "minor" : suffix === "7" ? "seventh" : /^dim$/i.test(suffix) ? "diminished" : "unknown";
-        return { root: match[1], quality };
+        const text = String(raw || "").replace(/♭/g, "b").replace(/♯/g, "#").trim();
+        const none = { root: "", quality: "unknown", approx: false, bassRoot: "" };
+        if (!text || /^(n\.?c\.?|no\s?chord)$/i.test(text)) return none;
+        // Split a slash bass ("C/G") but leave compound suffixes like "6/9" alone.
+        const slash = text.split("/");
+        let head = text, bassRoot = "";
+        if (slash.length === 2 && /^[A-G](?:#{1,2}|b{1,2}|x)?$/.test(slash[1].trim())) {
+          head = slash[0];
+          bassRoot = normalizeRoot(slash[1].trim());
+        }
+        const match = head.match(/^([A-G](?:#{1,2}|b{1,2}|x)?)(.*)$/);
+        if (!match) return none;
+        const root = normalizeRoot(match[1]);
+        if (!root) return none;
+        const suffix = normalizeChordSuffix(match[2]);
+        for (const [pattern, quality, approx] of CHORD_QUALITY_RULES) {
+          if (pattern.test(suffix)) return { root, quality, approx, bassRoot: bassRoot || root, raw: text };
+        }
+        return { root, quality: "unknown", approx: false, bassRoot: bassRoot || root, raw: text };
       };
       const isBassbeat = (beatNumber, beatsPerMeasure) =>
         beatsPerMeasure === 3 ? beatNumber === 1 : beatNumber % 2 === 1;
       const allChordButtons = raw => {
         const parsed = parseChordQuality(raw || "");
-        if (parsed.quality === "unknown" || !roots.includes(parsed.root)) return [];
-        return [{ id: "bass-" + parsed.root }, { id: parsed.quality + "-" + parsed.root }];
+        if (parsed.quality === "unknown") return [];
+        return [{ id: "bass-" + parsed.bassRoot }, { id: parsed.quality + "-" + parsed.root }];
       };
+      // What actually gets played, e.g. "Cmaj7" -> "C", "Am7/E" -> "Am/E".
+      const stradellaLabel = raw => {
+        const parsed = parseChordQuality(raw || "");
+        if (parsed.quality === "unknown") return "";
+        const base = chordLabels[parsed.quality](parsed.root);
+        return parsed.bassRoot && parsed.bassRoot !== parsed.root ? base + "/" + parsed.bassRoot : base;
+      };
+      const isApproxChord = raw => parseChordQuality(raw || "").approx === true;
       const selectChordButton = (raw, beatNumber, beatsPerMeasure) => {
         const parsed = parseChordQuality(raw || "");
-        if (parsed.quality === "unknown" || !roots.includes(parsed.root)) return { buttons: [], action: "none" };
+        if (parsed.quality === "unknown") return { buttons: [], action: "none" };
         if (isBassbeat(beatNumber, beatsPerMeasure)) {
-          return { buttons: [{ id: "bass-" + parsed.root, label: parsed.root }], action: "bass" };
+          return { buttons: [{ id: "bass-" + parsed.bassRoot, label: parsed.bassRoot }], action: "bass" };
         }
         return { buttons: [{ id: parsed.quality + "-" + parsed.root, label: chordLabels[parsed.quality](parsed.root) }], action: "chord" };
       };
@@ -265,7 +341,7 @@
       };
       const sampleEvents = [
         buildBeat("m1-b1", 1, 1, [note("c4","C4",2), note("e4","E4",1), note("g4","G4",1)], "C", 4),
-        buildBeat("m1-b2", 1, 2, [note("c4h","C4",1,true), note("d4","D4",1)], "C", 4),
+        buildBeat("m1-b2", 1, 2, [note("c4h","C4",1,true)], "C", 4),
         buildBeat("m1-b3", 1, 3, [note("f4","F4",2), note("a4","A4",1)], "Dm", 4),
         buildBeat("m1-b4", 1, 4, [note("f4h","F4",1,true)], "Dm", 4),
         buildBeat("m2-b1", 2, 1, [note("e5","E5",1)], "G7", 4),
@@ -285,7 +361,6 @@
       <note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><type>half</type></note>
       <note><chord/><pitch><step>E</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>
       <note><chord/><pitch><step>G</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>
-      <note><pitch><step>D</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>
       <harmony><root><root-step>D</root-step></root><kind text="Dm">minor</kind></harmony>
       <note><pitch><step>F</step><octave>4</octave></pitch><duration>2</duration><type>half</type></note>
       <note><chord/><pitch><step>A</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>
@@ -383,12 +458,14 @@
           osmd.cursor.hide();
         } catch (_) {}
         // Log for debugging: compare cursor keys vs event keys
-        const evKeys = events.slice(0, 16).map(e => e.measureNumber + "-" + e.beatNumber);
-        const mapKeys = [...posMap.keys()].slice(0, 16);
-        console.log("[Overlay] posMap:", posMap.size, "keys:", mapKeys.join(", "));
-        console.log("[Overlay] events:", events.length, "keys:", evKeys.join(", "));
-        const matched = events.filter(e => posMap.has(e.measureNumber + "-" + e.beatNumber)).length;
-        console.log("[Overlay] matched:", matched, "/", events.length);
+        if (DEBUG) {
+          const evKeys = events.slice(0, 16).map(e => e.measureNumber + "-" + e.beatNumber);
+          const mapKeys = [...posMap.keys()].slice(0, 16);
+          const matched = events.filter(e => posMap.has(e.measureNumber + "-" + e.beatNumber)).length;
+          console.log("[Overlay] posMap:", posMap.size, "keys:", mapKeys.join(", "));
+          console.log("[Overlay] events:", events.length, "keys:", evKeys.join(", "));
+          console.log("[Overlay] matched:", matched, "/", events.length);
+        }
 
         // 2. Map each event to a cursor position by (measureNumber, beatNumber)
         const hasReal = [];
@@ -444,6 +521,7 @@
       }
 
       let lastHlY = -1;
+      let lastScrollRowY = -1;
       function updateScoreHighlight() {
         const hl = $("score-highlight");
         if (!beatOverlayX.length) { hl.style.display = "none"; return; }
@@ -456,10 +534,16 @@
         hl.style.width  = beatOverlayW[index] + "px";
         hl.style.height = beatOverlayH[index] + "px";
         lastHlY = newY;
-        // Smooth scroll so current staff line stays near the top
+        // Scroll only on a row change, or when the highlight has drifted out of
+        // view. Re-issuing a smooth scroll on every beat made the animations
+        // pile up and lag behind the actual beat at fast tempos.
         const wrap = $("score-wrap");
-        const targetScroll = Math.max(0, newY - 16);
-        wrap.scrollTo({ top: targetScroll, behavior: "smooth" });
+        const height = beatOverlayH[index] || 60;
+        const outOfView = newY < wrap.scrollTop - 4 || newY + height > wrap.scrollTop + wrap.clientHeight;
+        if (newY !== lastScrollRowY || outOfView) {
+          wrap.scrollTo({ top: Math.max(0, newY - 16), behavior: playing && bpm > 140 ? "auto" : "smooth" });
+          lastScrollRowY = newY;
+        }
       }
       // ──────────────────────────────────────────────────────────────────
       let index = 0;
@@ -471,22 +555,63 @@
         if (!step || !octave) return "";
         return `${step}${alter === 1 ? "#" : alter === -1 ? "b" : ""}${octave}`;
       }
+      // MusicXML <kind> value -> chord-symbol suffix. parseChordQuality then
+      // reduces whatever comes out to a real Stradella button.
+      const KIND_SUFFIX = {
+        "major": "", "minor": "m", "augmented": "aug", "diminished": "dim",
+        "dominant": "7", "major-seventh": "maj7", "minor-seventh": "m7",
+        "diminished-seventh": "dim7", "augmented-seventh": "aug7",
+        "half-diminished": "m7b5", "major-minor": "mMaj7",
+        "major-sixth": "6", "minor-sixth": "m6",
+        "dominant-ninth": "9", "major-ninth": "maj9", "minor-ninth": "m9",
+        "dominant-11th": "11", "major-11th": "maj11", "minor-11th": "m11",
+        "dominant-13th": "13", "major-13th": "maj13", "minor-13th": "m13",
+        "suspended-second": "sus2", "suspended-fourth": "sus4",
+        "power": "5", "pedal": "", "other": "", "Neapolitan": "",
+        "Italian": "7", "French": "7", "German": "7", "Tristan": "",
+        "none": null
+      };
       function harmonyRaw(harmony) {
         const step = textOf(harmony, "root-step");
         if (!step) return "";
         const alter = asNumber(textOf(harmony, "root-alter"), 0);
-        const root = `${step}${alter === 1 ? "#" : alter === -1 ? "b" : ""}`;
+        const accidental = alter === 2 ? "##" : alter === 1 ? "#" : alter === -1 ? "b" : alter === -2 ? "bb" : "";
+        const root = step + accidental;
+        // Slash bass: <bass><bass-step>G</bass-step></bass>
+        const bassStep = textOf(harmony, "bass-step");
+        const bassAlter = asNumber(textOf(harmony, "bass-alter"), 0);
+        const bass = bassStep ? "/" + bassStep + (bassAlter === 1 ? "#" : bassAlter === -1 ? "b" : "") : "";
         const kind = harmony.querySelector("kind");
+        const kindValue = (kind?.textContent || "").trim();
+        if (kindValue === "none") return "";
+        // Prefer the engraved text, but only when it actually reads as a chord.
         const text = kind?.getAttribute("text")?.replace(/\s+/g, "");
-        if (text) return /^[A-G]/.test(text) ? text : root + text;
-        const kindValue = kind?.textContent?.trim() || "major";
-        const suffix = kindValue === "minor" ? "m" : kindValue === "dominant" || kindValue.includes("seventh") ? "7" : kindValue.includes("diminished") ? "dim" : "";
-        return root + suffix;
+        if (text) {
+          const candidate = (/^[A-G]/.test(text) ? text : root + text) + bass;
+          if (parseChordQuality(candidate).quality !== "unknown") return candidate;
+        }
+        const suffix = KIND_SUFFIX[kindValue];
+        if (suffix === null) return "";
+        if (suffix !== undefined) return root + suffix + bass;
+        // Unrecognized kind string: sniff for a keyword rather than give up.
+        const guess = kindValue.includes("diminish") ? "dim"
+          : kindValue.includes("minor") ? "m"
+          : kindValue.includes("augment") ? "aug"
+          : kindValue.includes("suspend") ? "sus4"
+          : kindValue.includes("dominant") || kindValue.includes("seventh") ? "7"
+          : "";
+        return root + guess + bass;
       }
-      function chordFromText(rawText) {
-        const normalized = String(rawText || "").replace(/♭/g, "b").replace(/♯/g, "#");
-        const pattern = /(^|[^A-Za-z0-9#b♭♯])([A-G](?:#|b|♭|♯)?(?:m|min|-|7|dim)?)(?=$|[^A-Za-z0-9#b♭♯])/g;
-        for (const match of normalized.matchAll(pattern)) {
+      // Root + any run of suffix characters, optionally followed by a slash bass.
+      // Over-matching is safe: parseChordQuality rejects anything that is not a
+      // chord, so an ordinary word like "Baby" or "Ciao" simply fails to parse.
+      const CHORD_TEXT_PATTERN = /(^|[^A-Za-z0-9#b\u266d\u266f])([A-G](?:#{1,2}|b{1,2}|x)?[A-Za-z0-9#b+\u00b0\u00ba\u00f8\u00d8\u0394\u2206\u25b3\-]*(?:\/[A-G](?:#|b)?)?)(?![A-Za-z0-9])/g;
+      function chordFromText(rawText, strict) {
+        const normalized = String(rawText || "").replace(/\u266d/g, "b").replace(/\u266f/g, "#");
+        // strict = the whole string must be the chord. Used for lyric text,
+        // where a loose match would turn syllables into phantom chords.
+        for (const match of normalized.matchAll(CHORD_TEXT_PATTERN)) {
+          if (strict && match[2] !== normalized.trim()) continue;
           if (allChordButtons(match[2]).length) return match[2];
         }
         return "";
@@ -494,48 +619,67 @@
       function textForChordScan(element) {
         return Array.from(element.querySelectorAll("words, rehearsal, lyric text, credit-words")).map(node => node.textContent || "").join(" ");
       }
-      function parseMusicXml(xmlText) {
+      // Scores sometimes lead with an empty or chord-only part, so default to
+      // the first part that actually carries notes.
+      const pickMelodyPart = infos => {
+        const withNotes = infos.filter(part => part.noteCount > 0);
+        return withNotes.length ? withNotes[0].index : 0;
+      };
+      function parseMusicXml(xmlText, melodyPartIndex) {
         const warnings = [];
+        const empty = { events: [], parts: [], melodyIndex: 0 };
         const doc = new DOMParser().parseFromString(xmlText, "application/xml");
-        if (doc.querySelector("parsererror")) return { events: [], warnings: ["MusicXML parse failure. Check the file format."] };
+        if (doc.querySelector("parsererror")) return { ...empty, warnings: ["MusicXML parse failure. Check the file format."] };
         const parts = Array.from(doc.querySelectorAll("part"));
-        if (!parts.length) return { events: [], warnings: ["Missing MusicXML part data."] };
+        if (!parts.length) return { ...empty, warnings: ["Missing MusicXML part data."] };
+        const partNames = Array.from(doc.querySelectorAll("part-list score-part"))
+          .map(scorePart => (scorePart.querySelector("part-name")?.textContent || "").trim());
+        const partInfo = parts.map((part, i) => ({
+          index: i,
+          name: partNames[i] || `Part ${i + 1}`,
+          // Pitched notes only - a chord-only staff is full of rests, and
+          // counting those would make it look like the melody part.
+          noteCount: part.querySelectorAll("note > pitch").length,
+          harmonyCount: part.querySelectorAll("harmony").length
+        }));
+        const melodyIndex = parts[melodyPartIndex] ? melodyPartIndex : pickMelodyPart(partInfo);
         const notes = [];
+        // beat -> { chord, priority }. <harmony> outranks <direction> text,
+        // which outranks a chord spotted in a lyric.
         const chordsByBeat = new Map();
-        const measures = [];
+        const setChord = (beat, chord, priority) => {
+          if (!chord) return;
+          const previous = chordsByBeat.get(beat);
+          if (!previous || previous.priority < priority) chordsByBeat.set(beat, { chord, priority });
+        };
+        const measuresByPart = [];
         parts.forEach((part, partIndex) => {
           let divisions = 1;
           let beatsPerMeasure = 4;
           let measureStart = 0;
+          const partMeasures = [];
           Array.from(part.children).filter(child => child.localName === "measure").forEach((measure, measureIndex) => {
             const attributes = measure.querySelector("attributes");
             divisions = asNumber(textOf(attributes, "divisions"), divisions);
             beatsPerMeasure = asNumber(textOf(attributes, "time > beats"), beatsPerMeasure);
             const measureNumber = asNumber(measure.getAttribute("number"), measureIndex + 1);
-            if (partIndex === 0) measures.push({ measureNumber, start: measureStart, beats: beatsPerMeasure });
+            partMeasures.push({ measureNumber, start: measureStart, beats: beatsPerMeasure });
             let cursor = 0;
             let lastNoteStart = 0;
             Array.from(measure.children).forEach((child, childIndex) => {
               if (child.localName === "backup") { cursor -= asNumber(textOf(child, "duration"), 0); return; }
               if (child.localName === "forward") { cursor += asNumber(textOf(child, "duration"), 0); return; }
-              if (child.localName === "harmony" && partIndex === 0) {
-                chordsByBeat.set(measureStart + Math.floor(cursor / divisions), harmonyRaw(child));
-                return;
-              }
-              if (child.localName === "direction" && partIndex === 0) {
-                const chord = chordFromText(textForChordScan(child));
-                if (chord) chordsByBeat.set(measureStart + Math.floor(cursor / divisions), chord);
-                return;
-              }
+              const beatKey = measureStart + Math.floor(cursor / divisions);
+              // Chord symbols come from every part - lead sheets often park them
+              // on a separate chord or guitar staff.
+              if (child.localName === "harmony") { setChord(beatKey, harmonyRaw(child), 3); return; }
+              if (child.localName === "direction") { setChord(beatKey, chordFromText(textForChordScan(child)), 2); return; }
               if (child.localName !== "note") return;
-              if (partIndex === 0) {
-                const lyricChord = chordFromText(textForChordScan(child));
-                if (lyricChord) chordsByBeat.set(measureStart + Math.floor(cursor / divisions), lyricChord);
-              }
+              if (partIndex === melodyIndex) setChord(beatKey, chordFromText(textForChordScan(child), true), 1);
               const duration = asNumber(textOf(child, "duration"), divisions);
               const isChordTone = Boolean(child.querySelector("chord"));
               const start = isChordTone ? lastNoteStart : cursor;
-              if (!child.querySelector("rest") && partIndex === 0) {
+              if (!child.querySelector("rest") && partIndex === melodyIndex) {
                 const name = pitchName(child.querySelector("pitch"));
                 if (name) notes.push({ id: `m${measureNumber}-n${childIndex}-${name}`, pitch: pitch(name), start: measureStart + start / divisions, durationBeats: Math.max(duration / divisions, 0.25) });
               }
@@ -546,14 +690,20 @@
             });
             measureStart += beatsPerMeasure;
           });
+          measuresByPart.push(partMeasures);
         });
+        // Beat grid follows the melody part, unless another part runs longer.
+        let measures = measuresByPart[melodyIndex] || [];
+        measuresByPart.forEach(list => { if (list.length > measures.length) measures = list; });
         const parsedEvents = [];
+        const approximations = new Map();
         let currentChord = "";
         measures.forEach(measure => {
           for (let beat = 0; beat < measure.beats; beat++) {
             const beatStart = measure.start + beat;
-            if (chordsByBeat.has(beatStart)) currentChord = chordsByBeat.get(beatStart);
+            if (chordsByBeat.has(beatStart)) currentChord = chordsByBeat.get(beatStart).chord;
             const beatNumber = beat + 1;
+            if (currentChord && isApproxChord(currentChord)) approximations.set(currentChord, stradellaLabel(currentChord));
             // Group all notes starting within this beat into onset buckets
             const onsetMap = new Map();
             notes.forEach(n => {
@@ -573,105 +723,131 @@
           }
         });
         if (!parsedEvents.length) warnings.push("No beat events could be extracted from this MusicXML file.");
-        console.log("[Parse] parts:", parts.length, "measures:", measures.length, "notes:", notes.length, "chords:", chordsByBeat.size);
-        console.log("[Parse] chordsByBeat:", [...chordsByBeat.entries()].slice(0, 20).map(([k,v]) => k + "=" + v).join(", "));
-        console.log("[Parse] first 12 events:", parsedEvents.slice(0, 12).map(e => `M${e.measureNumber}B${e.beatNumber}:${e.chordSymbol?.raw || "none"}[${e.activeRightHandNotes.length}n]`).join(", "));
-        return { events: parsedEvents, warnings };
+        else if (!parsedEvents.some(e => e.chordSymbol)) warnings.push("No chord symbols found in this score. Type the progression into the Chords box to supply them by hand.");
+        if (approximations.size) warnings.push("Simplified for the Stradella bass: " + [...approximations].map(([raw, played]) => `${raw} \u2192 ${played}`).join(", ") + ".");
+        if (partInfo.length > 1) warnings.push(`${partInfo.length} parts found; reading notes from "${partInfo[melodyIndex].name}".`);
+        if (DEBUG) {
+          console.log("[Parse] parts:", parts.length, "melody:", melodyIndex, "measures:", measures.length, "notes:", notes.length, "chords:", chordsByBeat.size);
+          console.log("[Parse] chordsByBeat:", [...chordsByBeat.entries()].slice(0, 20).map(([k, v]) => k + "=" + v.chord).join(", "));
+          console.log("[Parse] first 12 events:", parsedEvents.slice(0, 12).map(e => `M${e.measureNumber}B${e.beatNumber}:${e.chordSymbol?.raw || "none"}[${e.activeRightHandNotes.length}n]`).join(", "));
+        }
+        return { events: parsedEvents, warnings, parts: partInfo, melodyIndex };
       }
-      function renderPiano(active) {
-        const range = ["F3","F#3","G3","G#3","A3","A#3","B3","C4","C#4","D4","D#4","E4","F4","F#4","G4","G#4","A4","A#4","B4","C5","C#5","D5","D#5","E5","F5","F#5","G5","G#5","A5","A#5","B5","C6","C#6","D6","D#6","E6","F6","F#6","G6","G#6","A6"];
+      // The keyboard and the bass board never change shape, so build each SVG
+      // once and afterwards only toggle classes. Re-serialising ~160 SVG nodes
+      // on every beat was the main source of visual jank at high BPM.
+      const PIANO_RANGE = ["F3","F#3","G3","G#3","A3","A#3","B3","C4","C#4","D4","D#4","E4","F4","F#4","G4","G#4","A4","A#4","B4","C5","C#5","D5","D#5","E5","F5","F#5","G5","G#5","A5","A#5","B5","C6","C#6","D6","D#6","E6","F6","F#6","G6","G#6","A6"];
+      let pianoKeyEls = null;
+      let activePianoKeys = [];
+      function buildPianoSvg() {
         const whites = new Set(["C","D","E","F","G","A","B"]);
         const blackAfterWhite = { "C#":"C", "D#":"D", "F#":"F", "G#":"G", "A#":"A" };
         const whiteY = new Map();
         let html = "", whiteIndex = 0;
-        for (const id of range) {
+        for (const id of PIANO_RANGE) {
           const pc = id.slice(0, -1);
           if (whites.has(pc)) {
             const y = whiteIndex * 22;
             whiteY.set(id, y);
-            html += `<g><rect class="piano-key piano-key-white ${active.has(id) ? "is-active" : ""}" x="0" y="${y}" width="44" height="22" rx="2"></rect>${["F3","C4","C5","C6","A6"].includes(id) ? `<text class="key-label" x="48" y="${y + 15}">${id}</text>` : ""}</g>`;
+            html += `<g><rect class="piano-key piano-key-white" data-key="${id}" x="0" y="${y}" width="44" height="22" rx="2"></rect>${["F3","C4","C5","C6","A6"].includes(id) ? `<text class="key-label" x="48" y="${y + 15}">${id}</text>` : ""}</g>`;
             whiteIndex++;
           }
         }
-        for (const id of range) {
+        for (const id of PIANO_RANGE) {
           const pc = id.slice(0, -1), octave = id.slice(-1);
           const previousWhite = blackAfterWhite[pc];
           if (previousWhite && whiteY.has(previousWhite + octave)) {
             const y = whiteY.get(previousWhite + octave) + 22 * 0.65;
-            html += `<rect class="piano-key piano-key-black ${active.has(id) ? "is-active" : ""}" x="0" y="${y}" width="28" height="14" rx="2"></rect>`;
+            html += `<rect class="piano-key piano-key-black" data-key="${id}" x="0" y="${y}" width="28" height="14" rx="2"></rect>`;
           }
         }
         $("piano").innerHTML = html;
+        pianoKeyEls = new Map();
+        $("piano").querySelectorAll("[data-key]").forEach(el => pianoKeyEls.set(el.getAttribute("data-key"), el));
       }
-      function renderBass(beat) {
-        const activeIds = new Set(beat.activeLeftHandButtons.map(b => b.id));
-        const activeClass = beat.leftHandAction === "bass" ? "is-active-bass" : beat.leftHandAction === "chord" ? "is-active-chord" : "";
+      function renderPiano(active) {
+        if (!pianoKeyEls) buildPianoSvg();
+        activePianoKeys.forEach(el => el.classList.remove("is-active"));
+        activePianoKeys = [];
+        active.forEach(id => {
+          const el = pianoKeyEls.get(id);
+          if (el) { el.classList.add("is-active"); activePianoKeys.push(el); }
+        });
+      }
+      let bassButtonEls = null;
+      let activeBassButtons = [];
+      function buildBassSvg() {
         const splitLabel = label => label.endsWith("dim") ? [label.slice(0, -3), "dim"] : label.endsWith("7") ? [label.slice(0, -1), "7"] : label.endsWith("m") ? [label.slice(0, -1), "m"] : [label];
         let html = rows.map((row, rowIndex) => `<text class="row-label" x="${bassHeaderXOffset + rowIndex * 34}" y="${bassHeaderYOffset + 16}">${rowNames[row]}</text>`).join("");
         rows.forEach((row, rowIndex) => roots.forEach((root, columnIndex) => {
           const x = bassButtonXOffset + rowIndex * 34, y = bassButtonYOffset + 34 + columnIndex * 27 + rowIndex * 13, id = row + "-" + root, label = splitLabel(chordLabels[row](root));
-          html += `<g><circle class="bass-button ${activeIds.has(id) ? activeClass : ""}" cx="${x}" cy="${y}" r="11"></circle><text class="button-label" x="${x}" y="${y + 3}">${label[0]}${label[1] ? `<tspan x="${x}" dy="6" class="button-label-suffix">${label[1]}</tspan>` : ""}</text></g>`;
+          html += `<g><circle class="bass-button" data-bid="${id}" cx="${x}" cy="${y}" r="11"></circle><text class="button-label" x="${x}" y="${y + 3}">${label[0]}${label[1] ? `<tspan x="${x}" dy="6" class="button-label-suffix">${label[1]}</tspan>` : ""}</text></g>`;
         }));
         $("bass").innerHTML = html;
+        bassButtonEls = new Map();
+        $("bass").querySelectorAll("[data-bid]").forEach(el => bassButtonEls.set(el.getAttribute("data-bid"), el));
+      }
+      function renderBass(beat) {
+        if (!bassButtonEls) buildBassSvg();
+        activeBassButtons.forEach(el => el.classList.remove("is-active-bass", "is-active-chord"));
+        activeBassButtons = [];
+        const activeClass = beat.leftHandAction === "bass" ? "is-active-bass" : beat.leftHandAction === "chord" ? "is-active-chord" : "";
+        if (!activeClass) return;
+        beat.activeLeftHandButtons.forEach(button => {
+          const el = bassButtonEls.get(button.id);
+          if (el) { el.classList.add(activeClass); activeBassButtons.push(el); }
+        });
       }
       let noteSound = false;
       let bassSound = false;
       $("notesound").onchange = () => { noteSound = $("notesound").checked; };
       $("basssound").onchange = () => { bassSound = $("basssound").checked; };
 
-      const NOTE_SEMITONES = { C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11,Cb:11,Fb:4,Bbb:10 };
-      const CHORD_INTERVALS = { bass: [0], major: [0, 4, 7], minor: [0, 3, 7], seventh: [0, 4, 7, 10], diminished: [0, 3, 6] };
-      function playBassButtonSound(beat) {
-        const btn = beat.activeLeftHandButtons[0];
-        if (!btn) return;
+      // Every voice goes through one master gain (so stacked notes cannot clip)
+      // and takes an absolute audio-clock time, which is what lets autoplay queue
+      // sound ahead of the beat instead of firing it from a timer.
+      function scheduleVoice(ctx, freq, when, peak, decay, type) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(masterGain);
+        osc.type = type;
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(peak, when);
+        gain.gain.exponentialRampToValueAtTime(0.0001, when + decay);
+        osc.start(when);
+        osc.stop(when + decay + 0.01);
+      }
+      function playBassButtonSound(beat, when) {
+        const button = beat.activeLeftHandButtons[0];
+        if (!button) return;
         try {
           const ctx = getAudioCtx();
-          const m = btn.id.match(/^([^-]+)-(.+)$/);
-          if (!m) return;
-          const row = m[1], root = m[2];
-          const intervals = CHORD_INTERVALS[row];
-          if (!intervals) return;
-          const rootSemi = NOTE_SEMITONES[root];
-          if (rootSemi === undefined) return;
-          const octave = row === "bass" ? 4 : 4;
-          const baseMidi = 12 * (octave + 1) + rootSemi;
-          intervals.forEach(interval => {
-            const freq = 440 * Math.pow(2, (baseMidi + interval - 69) / 12);
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.connect(gain); gain.connect(ctx.destination);
-            osc.type = "triangle";
-            osc.frequency.value = freq;
-            gain.gain.setValueAtTime(0.25, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.7);
-            osc.start(ctx.currentTime);
-            osc.stop(ctx.currentTime + 0.71);
-          });
+          const match = button.id.match(/^([^-]+)-(.+)$/);
+          if (!match) return;
+          const intervals = CHORD_INTERVALS[match[1]];
+          const rootSemi = NOTE_SEMITONES[match[2]];
+          if (!intervals || rootSemi === undefined) return;
+          const baseMidi = 12 * 5 + rootSemi;
+          const at = Math.max(when ?? ctx.currentTime, ctx.currentTime);
+          intervals.forEach(interval =>
+            scheduleVoice(ctx, 440 * Math.pow(2, (baseMidi + interval - 69) / 12), at, 0.25, 0.7, "triangle"));
         } catch (_) {}
       }
+      const sharpSpelling = name => name.replace(/^Db/, "C#").replace(/^Eb/, "D#").replace(/^Gb/, "F#").replace(/^Ab/, "G#").replace(/^Bb/, "A#");
       function noteToFreq(pitchName) {
-        const m = pitchName.match(/^([A-G][b#]?)(\d)$/);
-        if (!m) return null;
-        const semi = NOTE_SEMITONES[m[1]];
+        const match = pitchName.match(/^([A-G][b#]?)(\d)$/);
+        if (!match) return null;
+        const semi = NOTE_SEMITONES[match[1]];
         if (semi === undefined) return null;
-        const midi = 12 * (Number(m[2]) + 1) + semi;
-        return 440 * Math.pow(2, (midi - 69) / 12);
+        return 440 * Math.pow(2, (12 * (Number(match[2]) + 1) + semi - 69) / 12);
       }
-      function playNoteChord(notes) {
+      function playNoteChord(notes, when) {
         try {
           const ctx = getAudioCtx();
+          const at = Math.max(when ?? ctx.currentTime, ctx.currentTime);
           notes.forEach(n => {
-            const freq = noteToFreq(n.pitch.name.replace(/^Db/,"C#").replace(/^Eb/,"D#").replace(/^Gb/,"F#").replace(/^Ab/,"G#").replace(/^Bb/,"A#"));
-            if (!freq) return;
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.connect(gain); gain.connect(ctx.destination);
-            osc.type = "triangle";
-            osc.frequency.value = freq;
-            gain.gain.setValueAtTime(0.18, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.55);
-            osc.start(ctx.currentTime);
-            osc.stop(ctx.currentTime + 0.56);
+            const freq = noteToFreq(sharpSpelling(n.pitch.name));
+            if (freq) scheduleVoice(ctx, freq, at, 0.18, 0.55, "triangle");
           });
         } catch (_) {}
       }
@@ -684,17 +860,22 @@
         const onsets = beat.noteOnsets || [];
         if (idx >= onsets.length) return;
         const onset = onsets[idx];
-        const toKey = n => n.pitch.name.replace(/^Db/,"C#").replace(/^Eb/,"D#").replace(/^Gb/,"F#").replace(/^Ab/,"G#").replace(/^Bb/,"A#");
         // at first onset, show ALL active notes (new + held); subsequent onsets show only new notes
         const displayNotes = idx === 0 ? beat.activeRightHandNotes : onset.notes;
-        renderPiano(new Set(displayNotes.map(toKey)));
-        if (noteSound) playNoteChord(displayNotes);
+        renderPiano(new Set(displayNotes.map(n => sharpSpelling(n.pitch.name))));
+        // During autoplay the notes are already queued on the audio clock, so
+        // only manual stepping makes sound here.
+        if (noteSound && !playing) playNoteChord(displayNotes);
         if (idx + 1 < onsets.length) {
           const gap = onsets[idx + 1].posInBeat - onset.posInBeat;
-          const delay = Math.max(80, gap * (60000 / bpm));
+          // The floor only guards against a zero-length timer. It must stay well
+          // under the real sub-beat gap, otherwise fast passages (four
+          // sixteenths at 200 BPM) overrun the beat they belong to.
+          const delay = Math.max(16, gap * (60000 / bpm));
           noteAnimTimer = setTimeout(() => animateOnsets(beat, idx + 1), delay);
         }
       }
+      let lastWarningsHtml = null;
       function render() {
         clearNoteAnim();
         const beat = events[index] || sampleEvents[0];
@@ -708,40 +889,60 @@
         updateScoreHighlight();
         animateOnsets(beat, 0);
         renderBass(beat);
-        if (bassSound) playBassButtonSound(beat);
-        const btn = beat.activeLeftHandButtons[0];
+        if (bassSound && !playing) playBassButtonSound(beat);
+        const button = beat.activeLeftHandButtons[0];
         const actionColor = beat.leftHandAction === "bass" ? "#49c6a3" : beat.leftHandAction === "chord" ? "#ffd166" : "transparent";
         const actionLabel = beat.leftHandAction === "bass" ? "Bass note" : beat.leftHandAction === "chord" ? "Chord button" : "—";
-        const posLabel = `Measure ${beat.measureNumber}, ${beatLabel} / ${beat.beatsPerMeasure ?? 4}`;
-        $("info").innerHTML = `<div><dt>Position</dt><dd>${posLabel}</dd></div><div><dt>Chord</dt><dd>${beat.chordSymbol?.raw || "None"}</dd></div><div><dt>Left Hand</dt><dd><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:700;background:${actionColor};color:#1a2420">${actionLabel}</span>${btn ? ` <strong>${btn.label}</strong>` : ""}</dd></div><div><dt>Right Hand</dt><dd>${beat.activeRightHandNotes.map(n => n.pitch.name + (n.isSustained ? " (held)" : "")).join(", ") || "Rest"}</dd></div>`;
+        const raw = beat.chordSymbol?.raw || "";
+        const played = raw ? stradellaLabel(raw) : "";
+        $("info-position").textContent = `Measure ${beat.measureNumber}, ${beatLabel} / ${beat.beatsPerMeasure ?? 4}`;
+        $("info-chord").innerHTML = raw
+          ? `${raw}${played && played !== raw ? `<span class="chord-approx">→ ${played}</span>` : ""}`
+          : "None";
+        $("info-lefthand").innerHTML = `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:700;background:${actionColor};color:#1a2420">${actionLabel}</span>${button ? ` <strong>${button.label}</strong>` : ""}`;
+        $("info-righthand").textContent = beat.activeRightHandNotes.map(n => n.pitch.name + (n.isSustained ? " (held)" : "")).join(", ") || "Rest";
         const warnings = globalWarnings.concat(beat.warnings);
-        $("warnings").innerHTML = warnings.length ? `<div class="warnings-panel"><h4>Warnings</h4><ul>${warnings.map(w => `<li>${w}</li>`).join("")}</ul></div>` : "";
+        const html = warnings.length ? `<div class="warnings-panel"><h4>Warnings</h4><ul>${warnings.map(w => `<li>${w}</li>`).join("")}</ul></div>` : "";
+        if (html !== lastWarningsHtml) { $("warnings").innerHTML = html; lastWarningsHtml = html; }
       }
-      // ── Autoplay / Metronome ───────────────────────────────────────────
+      // ── Autoplay / Metronome ──────────────────────────────────
+      // Timing comes from the Web Audio clock, not from setTimeout. A 25 ms
+      // scheduler tick queues every beat falling inside the next 120 ms directly
+      // on the audio clock, so the metronome cannot accumulate drift no matter
+      // how long a render takes. A requestAnimationFrame loop then flips the
+      // visuals as the audio clock passes each queued beat, which keeps the
+      // diagram in step with what you hear instead of racing it.
       let bpm = 80;
       let playing = false;
-      let playTimer = null;
       let audioCtx = null;
+      let masterGain = null;
+      const LOOKAHEAD_SECONDS = 0.12;
+      const SCHEDULER_TICK_MS = 25;
+      const START_DELAY_SECONDS = 0.06;
+      let schedulerTimer = null;
+      let visualFrame = null;
+      let nextBeatIndex = 0;
+      let nextBeatTime = 0;
+      let beatQueue = [];
+
+      const secondsPerBeat = () => 60 / bpm;
 
       function getAudioCtx() {
-        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (!audioCtx) {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          masterGain = audioCtx.createGain();
+          masterGain.gain.value = 0.85;
+          masterGain.connect(audioCtx.destination);
+        }
         if (audioCtx.state === "suspended") audioCtx.resume();
         return audioCtx;
       }
 
-      function playClick(strong) {
+      function playClick(strong, when) {
         try {
           const ctx = getAudioCtx();
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.type = "sine";
-          osc.frequency.value = strong ? 1050 : 750;
-          gain.gain.setValueAtTime(strong ? 0.45 : 0.28, ctx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.08);
-          osc.start(ctx.currentTime);
-          osc.stop(ctx.currentTime + 0.09);
+          const at = Math.max(when ?? ctx.currentTime, ctx.currentTime);
+          scheduleVoice(ctx, strong ? 1050 : 750, at, strong ? 0.45 : 0.28, 0.08, "sine");
         } catch (_) {}
       }
 
@@ -752,39 +953,72 @@
         setTimeout(() => dot.classList.remove("strong", "weak"), 120);
       }
 
-      function scheduleNext() {
-        const interval = Math.round(60000 / bpm);
-        playTimer = setTimeout(() => {
-          if (!playing) return;
-          if (index >= events.length - 1) {
-            stopAutoplay();
-            return;
-          }
-          index++;
-          const beat = events[index];
-          const strong = beat.beatNumber === 1;
-          playClick(strong);
-          flashBeat(strong);
+      // Queue one beat's audio - click, bass button, and each sub-beat note
+      // onset - at exact offsets from that beat's start time.
+      function scheduleBeatAudio(beatIndex, when) {
+        const beat = events[beatIndex];
+        if (!beat) return;
+        playClick(beat.beatNumber === 1, when);
+        if (bassSound) playBassButtonSound(beat, when);
+        if (noteSound) {
+          const spb = secondsPerBeat();
+          (beat.noteOnsets || []).forEach((onset, i) => {
+            playNoteChord(i === 0 ? beat.activeRightHandNotes : onset.notes, when + onset.posInBeat * spb);
+          });
+        }
+      }
+
+      function schedulerTick() {
+        if (!playing) return;
+        const ctx = getAudioCtx();
+        // A backgrounded tab throttles setInterval to about 1 Hz, so the tick
+        // can wake up long after the beats it owed. Resync rather than firing
+        // every missed beat at once.
+        if (nextBeatTime < ctx.currentTime - 0.25) nextBeatTime = ctx.currentTime + 0.02;
+        while (nextBeatIndex < events.length && nextBeatTime < ctx.currentTime + LOOKAHEAD_SECONDS) {
+          scheduleBeatAudio(nextBeatIndex, nextBeatTime);
+          beatQueue.push({ index: nextBeatIndex, time: nextBeatTime });
+          // Reading the tempo here means a BPM change takes hold within one
+          // lookahead window, with no re-anchoring required.
+          nextBeatTime += secondsPerBeat();
+          nextBeatIndex++;
+        }
+      }
+
+      function visualTick() {
+        if (!playing) { visualFrame = null; return; }
+        const now = getAudioCtx().currentTime;
+        let due = -1;
+        while (beatQueue.length && beatQueue[0].time <= now) due = beatQueue.shift().index;
+        if (due >= 0) {
+          index = due;
+          flashBeat(events[index]?.beatNumber === 1);
           render();
-          scheduleNext();
-        }, interval);
+        }
+        if (!beatQueue.length && nextBeatIndex >= events.length) { stopAutoplay(); return; }
+        visualFrame = requestAnimationFrame(visualTick);
       }
 
       function startAutoplay() {
+        if (!events.length) return;
+        const ctx = getAudioCtx();
         playing = true;
         $("playbtn").textContent = "⏹ Stop";
         $("playbtn").classList.add("is-playing");
-        const beat = events[index];
-        const strong = beat ? beat.beatNumber === 1 : true;
-        playClick(strong);
-        flashBeat(strong);
-        scheduleNext();
+        clearNoteAnim();
+        beatQueue = [];
+        nextBeatIndex = index;
+        nextBeatTime = ctx.currentTime + START_DELAY_SECONDS;
+        schedulerTick();
+        schedulerTimer = setInterval(schedulerTick, SCHEDULER_TICK_MS);
+        visualFrame = requestAnimationFrame(visualTick);
       }
 
       function stopAutoplay() {
         playing = false;
-        clearTimeout(playTimer);
-        playTimer = null;
+        if (schedulerTimer) { clearInterval(schedulerTimer); schedulerTimer = null; }
+        if (visualFrame) { cancelAnimationFrame(visualFrame); visualFrame = null; }
+        beatQueue = [];
         clearNoteAnim();
         $("playbtn").textContent = "▶ Play";
         $("playbtn").classList.remove("is-playing");
@@ -800,7 +1034,7 @@
         bpm = Math.min(200, Math.max(20, Number($("bpmnum").value) || bpm));
         $("bpmslider").value = bpm;
       };
-      // ──────────────────────────────────────────────────────────────────
+      // ───────────────────────────────────────────────────────────────────
 
       $("prev").onclick = () => { stopAutoplay(); index = Math.max(0, index - 1); render(); };
       $("next").onclick = () => { stopAutoplay(); index = Math.min(events.length - 1, index + 1); render(); };
@@ -812,44 +1046,114 @@
         else if (e.key === "Home") { e.preventDefault(); stopAutoplay(); index = 0; render(); }
         else if (e.key === "End") { e.preventDefault(); stopAutoplay(); index = events.length - 1; render(); }
       });
-      $("sample").onclick = () => { stopAutoplay(); events = sampleEvents; globalWarnings = []; index = 0; render(); loadScoreIntoOSMD(SAMPLE_XML); };
+      // ── Score loading ──────────────────────────────────────
+      let currentXmlText = null;
+      let manualChordText = "";
+
+      function populatePartSelector(parsed) {
+        const sel = $("melody-part");
+        if (!parsed.parts || parsed.parts.length < 2) { sel.style.display = "none"; sel.innerHTML = ""; return; }
+        sel.innerHTML = parsed.parts.map(part =>
+          `<option value="${part.index}">${part.name} (${part.noteCount} notes)</option>`).join("");
+        sel.value = String(parsed.melodyIndex);
+        sel.style.display = "";
+      }
+
+      // "Am | Am | Dm E7 | Am" - one group per measure; the chords in a group are
+      // spread evenly across that measure's beats. "-" holds the previous chord.
+      function applyChordOverride(list, text) {
+        const groups = String(text || "").split("|").map(part => part.trim()).filter(Boolean);
+        if (!groups.length || !list.length) return [];
+        const measureNums = [...new Set(list.map(e => e.measureNumber))];
+        const byMeasure = new Map();
+        measureNums.forEach((num, i) => { if (i < groups.length) byMeasure.set(num, groups[i].split(/\s+/).filter(Boolean)); });
+        let carried = "";
+        list.forEach(e => {
+          const slots = byMeasure.get(e.measureNumber);
+          if (!slots || !slots.length) return;
+          const beats = e.beatsPerMeasure || 4;
+          const slot = Math.min(slots.length - 1, Math.floor((e.beatNumber - 1) * slots.length / beats));
+          const chord = /^[-.]+$/.test(slots[slot]) ? carried : slots[slot];
+          if (!chord) return;
+          carried = chord;
+          const { buttons, action } = selectChordButton(chord, e.beatNumber, beats);
+          e.chordSymbol = { raw: chord };
+          e.activeLeftHandButtons = buttons;
+          e.leftHandAction = action;
+          e.warnings = (e.warnings || [])
+            .filter(w => !/No chord symbol detected|Unsupported chord symbol/.test(w))
+            .concat(chordWarnings(chord));
+        });
+        const notes = [];
+        if (groups.length !== measureNums.length) notes.push(`Chord override covers ${groups.length} measure(s); the score has ${measureNums.length}.`);
+        const unknown = [...new Set(groups.join(" ").split(/\s+/)
+          .filter(chord => chord && !/^[-.]+$/.test(chord) && !allChordButtons(chord).length))];
+        if (unknown.length) notes.push("Unrecognized chords in the override: " + unknown.join(", ") + ".");
+        return notes;
+      }
+
+      function adoptParse(parsed, xmlText, header) {
+        if (!parsed.events.length) { globalWarnings = header.concat(parsed.warnings); return false; }
+        stopAutoplay();
+        currentXmlText = xmlText;
+        events = parsed.events;
+        index = 0;
+        lastScrollRowY = -1;
+        const overrideWarnings = applyChordOverride(events, manualChordText);
+        globalWarnings = header.concat(parsed.warnings, overrideWarnings);
+        populatePartSelector(parsed);
+        return true;
+      }
+
+      // Re-run the parser on the score already loaded - used when the melody
+      // part or the manual chord override changes. The rendered score stays put.
+      function reparseCurrent() {
+        if (!currentXmlText) { render(); return; }
+        const selected = Number($("melody-part").value);
+        const parsed = parseMusicXml(currentXmlText, Number.isFinite(selected) ? selected : 0);
+        if (adoptParse(parsed, currentXmlText, [])) buildBeatOverlay();
+        render();
+      }
+
+      $("melody-part").onchange = reparseCurrent;
+      $("chord-apply").onclick = () => { manualChordText = $("chord-input").value.trim(); reparseCurrent(); };
+      $("chord-clear").onclick = () => { $("chord-input").value = ""; manualChordText = ""; reparseCurrent(); };
+      $("chord-input").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); $("chord-apply").click(); } };
+
+      $("sample").onclick = () => {
+        const parsed = parseMusicXml(SAMPLE_XML);
+        if (adoptParse(parsed, SAMPLE_XML, ["Sample score loaded."])) loadScoreIntoOSMD(SAMPLE_XML);
+        else { stopAutoplay(); events = sampleEvents; index = 0; }
+        render();
+      };
+
       async function convertPdf(file) {
         const body = new FormData();
         body.append("score", file);
         const response = await fetch("http://localhost:8787/api/omr", { method: "POST", body });
         const result = await response.json();
         if (!response.ok || !result.musicXml) {
-          return {
-            events: [], xmlText: null,
-            warnings: [...(result.warnings || []), result.details || result.error || "OMR conversion failed."]
-          };
+          return { parsed: null, xmlText: null, warnings: [...(result.warnings || []), result.details || result.error || "OMR conversion failed."] };
         }
-        const parsed = parseMusicXml(result.musicXml);
-        return {
-          events: parsed.events, xmlText: result.musicXml,
-          warnings: [`PDF converted: ${file.name}`, ...(result.warnings || []), ...parsed.warnings]
-        };
+        return { parsed: parseMusicXml(result.musicXml), xmlText: result.musicXml, warnings: result.warnings || [] };
       }
+
       $("file").onchange = async e => {
         const file = e.target.files[0];
         if (!file) return;
         const name = file.name.toLowerCase();
+        const scoreName = file.name.replace(/\.[^.]+$/, "");
         if (name.endsWith(".pdf")) {
           globalWarnings = [`PDF uploaded: ${file.name}`, "Converting with local OMR server..."];
           render();
           try {
-            const parsed = await convertPdf(file);
-            if (parsed.events.length) {
-              stopAutoplay();
-              events = parsed.events;
-              index = 0;
-              if (parsed.xmlText) {
-                loadScoreIntoOSMD(parsed.xmlText);
-                const scoreName = file.name.replace(/\.[^.]+$/, "");
-                saveScore(scoreName, parsed.xmlText).then(populateSavedScores).catch(() => {});
-              }
+            const converted = await convertPdf(file);
+            if (converted.parsed && adoptParse(converted.parsed, converted.xmlText, [`PDF converted: ${file.name}`, ...converted.warnings])) {
+              loadScoreIntoOSMD(converted.xmlText);
+              saveScore(scoreName, converted.xmlText).then(populateSavedScores).catch(() => {});
+            } else {
+              globalWarnings = [`PDF uploaded: ${file.name}`, ...converted.warnings];
             }
-            globalWarnings = parsed.warnings;
           } catch {
             globalWarnings = [`PDF uploaded: ${file.name}`, "Start the local OMR server with npm run omr:server and configure AUDIVERIS_CMD to enable PDF recognition."];
           }
@@ -862,21 +1166,15 @@
         reader.onload = () => {
           const xmlText = String(reader.result || "");
           const parsed = parseMusicXml(xmlText);
-          if (parsed.events.length) {
-            stopAutoplay();
-            events = parsed.events;
-            index = 0;
-            globalWarnings = [`MusicXML loaded: ${file.name}`, ...parsed.warnings];
+          if (adoptParse(parsed, xmlText, [`MusicXML loaded: ${file.name}`])) {
             loadScoreIntoOSMD(xmlText);
-            const scoreName = file.name.replace(/\.[^.]+$/, "");
             saveScore(scoreName, xmlText).then(populateSavedScores).catch(() => {});
-          } else {
-            globalWarnings = parsed.warnings;
           }
           render();
         };
         reader.readAsText(file);
       };
+
       $("saved-scores").onchange = async () => {
         const id = parseInt($("saved-scores").value);
         if (!id) { $("delete-score").style.display = "none"; return; }
@@ -885,21 +1183,14 @@
           const record = await loadScore(id);
           if (!record) return;
           const parsed = parseMusicXml(record.xml);
-          if (parsed.events.length) {
-            stopAutoplay();
-            events = parsed.events;
-            index = 0;
-            globalWarnings = [`Loaded: ${record.name}`, ...parsed.warnings];
-            loadScoreIntoOSMD(record.xml);
-          } else {
-            globalWarnings = parsed.warnings;
-          }
+          if (adoptParse(parsed, record.xml, [`Loaded: ${record.name}`])) loadScoreIntoOSMD(record.xml);
           render();
         } catch (err) {
           globalWarnings = ["Failed to load saved score: " + err.message];
           render();
         }
       };
+
       $("delete-score").onclick = async () => {
         const id = parseInt($("saved-scores").value);
         if (!id) return;

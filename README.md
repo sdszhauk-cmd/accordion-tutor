@@ -15,7 +15,7 @@ A beginner-friendly web app for **120-bass piano accordion** practice. Upload a 
 | **Beat-by-beat navigation** | Arrow keys, Space, Prev/Next buttons, or click any beat on the score |
 | **SVG accordion diagram** | Vertical piano keyboard (right hand) + full 120-bass Stradella grid (left hand), displayed to the left of the score |
 | **Bass / chord alternation** | Odd beats (1, 3) highlight the **bass note** button in green; even beats (2, 4) highlight the **chord button** in amber — never both at once |
-| **Autoplay metronome** | Plays a Web Audio click, advances beats automatically, stops at the last beat |
+| **Autoplay metronome** | Plays a Web Audio click, advances beats automatically, stops at the last beat. Beats are scheduled on the Web Audio clock, so the tempo does not drift over long scores |
 | **BPM control** | Slider (20–200 BPM) + number input, both stay in sync. Default 80 BPM |
 | **Note sound** | Optional toggle — plays a short piano-like tone for each right-hand note as it lights up, including sub-beat off-beat notes in sequence |
 | **Bass sound** | Optional toggle — plays the Stradella button sound (single bass note on bass beats, full chord voicing on chord beats) |
@@ -24,6 +24,9 @@ A beginner-friendly web app for **120-bass piano accordion** practice. Upload a 
 | **MusicXML upload** | Parsed entirely in the browser — no server required |
 | **Saved score library** | Uploaded scores are automatically saved to IndexedDB and persist across page refreshes. Reload any previously uploaded score from the "Saved Scores" dropdown, or delete it with the ✕ button |
 | **Built-in sample score** | 2-measure demo (C → Dm → G7 → Bbdim) loads instantly |
+| **Extended chord support** | `Cmaj7`, `C6`, `C9`, `Csus4`, `Caug`, `Cm7b5`, slash chords and the rest are reduced to the nearest Stradella button, and the Current Beat panel shows what is actually played (`Cmaj7 → C`) |
+| **Multi-part scores** | Chord symbols are collected from every part, so a separate chord or guitar staff is picked up. Notes come from the melody part, auto-detected and switchable from a dropdown |
+| **Manual chord entry** | A **Chords** box overrides the score's chords one measure at a time — the practical fallback when OMR misses the harmony |
 | **Warnings panel** | Unsupported chords, missing harmony tags, and parse issues reported inline |
 
 ---
@@ -70,16 +73,32 @@ Each beat event carries:
 | 2/4 | 1 | 2 |
 | 3/4 | 1 | 2, 3 |
 
-Chord symbol → button mapping:
+Chord symbol → button mapping. A Stradella board only has four chord rows, so
+richer symbols are reduced to the closest playable button:
 
-| Symbol | Bass button | Chord button |
-|---|---|---|
-| `C` | `bass-C` | `major-C` |
-| `Cm` / `Cmin` / `C-` | `bass-C` | `minor-C` |
-| `C7` | `bass-C` | `seventh-C` |
-| `Cdim` / `C°` | `bass-C` | `diminished-C` |
+| Symbol | Bass button | Chord button | Exact? |
+|---|---|---|---|
+| `C` / `Cmaj` | `bass-C` | `major-C` | yes |
+| `Cm` / `Cmin` / `C-` | `bass-C` | `minor-C` | yes |
+| `C7` | `bass-C` | `seventh-C` | yes |
+| `Cdim` / `Cdim7` / `C°` | `bass-C` | `diminished-C` | yes |
+| `Cmaj7` / `CΔ` / `C6` / `Cadd9` / `Csus4` / `Caug` / `C+` | `bass-C` | `major-C` | reduced |
+| `Cm7` / `Cm6` / `Cm9` / `Cm11` | `bass-C` | `minor-C` | reduced |
+| `C9` / `C13` / `C7sus4` / `C7b9` / `Caug7` | `bass-C` | `seventh-C` | reduced |
+| `Cm7b5` / `Cø` | `bass-C` | `diminished-C` | reduced |
+| `C/G` (slash) | `bass-G` | `major-C` | bass note follows the slash |
 
-Accidentals normalize to ASCII (`B♭` → `Bb`, `F♯` → `F#`).
+Reduced chords are played, not rejected. The Current Beat panel shows the
+reduction (`Cmaj7 → C`) and the warnings panel lists every symbol that was
+simplified, so you can see what the arrangement loses.
+
+Accidentals normalize to ASCII (`B♭` → `Bb`, `F♯` → `F#`), and unusual
+spellings fall back to their enharmonic equivalent (`E#` → `F`).
+
+MusicXML `<kind>` values are mapped in full — `major-seventh`, `minor-seventh`,
+`half-diminished`, `dominant-ninth`, `suspended-fourth`, `augmented` and the
+rest — rather than the four values the parser previously understood. `<bass>`
+elements become slash chords, and `kind="none"` is treated as no chord.
 
 ---
 
@@ -290,6 +309,21 @@ The rendered score shows the full notation of the uploaded MusicXML file. A **da
 - **Auto-scroll**: the score panel scrolls automatically to keep the active staff line near the top
 - **Click navigation**: click anywhere on the score to jump to that beat
 
+### Chord Override
+
+When a score has no chord symbols — common after PDF/OMR conversion — type the
+progression into the **Chords** box and press Apply (or Enter):
+
+```
+Am | Am | Dm E7 | Am
+```
+
+One group per measure, separated by `|`. Several chords in one group are spread
+evenly across that measure's beats, and `-` holds the previous chord. Clear the
+box and press Clear to fall back to whatever the score itself contains. The
+override is re-applied whenever the score is re-parsed, including when the
+melody part changes.
+
 ### Autoplay / Metronome
 
 1. Set the BPM using the slider or the number input.
@@ -330,8 +364,8 @@ Uploaded scores are automatically saved to IndexedDB in the browser:
 
 ## Known Limitations
 
-- Only the **first MusicXML part** is read as right-hand notes and chord symbols.
-- Extended chords (`Cmaj7`, `C6`, `C9`, sus chords, slash chords) are not mapped to Stradella buttons and produce warnings.
+- Right-hand notes come from **one part at a time**. Chord symbols are read from every part, and the melody part is auto-detected (the first part with pitched notes) and can be changed from the part dropdown, but the app does not merge two staves into one line.
+- Extended chords are **approximated, not voiced** — `Cmaj7` plays as `C`, `C9` as `C7`. The Stradella board has no button for them; the Current Beat panel names the substitution.
 - Compressed `.mxl` archives are not decompressed in-browser.
 - **PDF → MusicXML conversion is lossy.** Audiveris OMR frequently misses chord symbols, misreads accidentals, or drops notes — especially on scanned or handwritten scores. Always prefer native `.musicxml` files when available.
 - The counterbass row is displayed on the Stradella grid but is never highlighted automatically.
