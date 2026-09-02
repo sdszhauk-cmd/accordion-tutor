@@ -1135,7 +1135,15 @@
         if (!response.ok || !result.musicXml) {
           return { parsed: null, xmlText: null, warnings: [...(result.warnings || []), result.details || result.error || "OMR conversion failed."] };
         }
-        return { parsed: parseMusicXml(result.musicXml), xmlText: result.musicXml, warnings: result.warnings || [] };
+        return {
+          parsed: parseMusicXml(result.musicXml),
+          xmlText: result.musicXml,
+          // The server reads chord symbols out of the PDF's text layer, which is
+          // far more reliable than OMR at recognising them.
+          chordOverride: result.chordOverride || "",
+          source: result.source || "",
+          warnings: result.warnings || []
+        };
       }
 
       $("file").onchange = async e => {
@@ -1148,11 +1156,27 @@
           render();
           try {
             const converted = await convertPdf(file);
-            if (converted.parsed && adoptParse(converted.parsed, converted.xmlText, [`PDF converted: ${file.name}`, ...converted.warnings])) {
+            const extra = [];
+            if (converted.parsed && converted.chordOverride) {
+              // Only adopt the extracted chords automatically when they line up
+              // measure-for-measure; otherwise they would be applied at an
+              // offset, which is worse than leaving them for the user to apply.
+              const groups = converted.chordOverride.split("|").length;
+              const measures = new Set(converted.parsed.events.map(e => e.measureNumber)).size;
+              $("chord-input").value = converted.chordOverride;
+              if (groups === measures) {
+                manualChordText = converted.chordOverride;
+                extra.push(`Chord symbols read from the PDF text applied to ${groups} measure(s).`);
+              } else {
+                manualChordText = "";
+                extra.push(`Chord symbols read from the PDF cover ${groups} measure(s) but the score parsed as ${measures}; they are in the Chords box - press Apply to use them.`);
+              }
+            }
+            if (converted.parsed && adoptParse(converted.parsed, converted.xmlText, [`PDF converted: ${file.name}`, ...converted.warnings, ...extra])) {
               loadScoreIntoOSMD(converted.xmlText);
               saveScore(scoreName, converted.xmlText).then(populateSavedScores).catch(() => {});
             } else {
-              globalWarnings = [`PDF uploaded: ${file.name}`, ...converted.warnings];
+              globalWarnings = [`PDF uploaded: ${file.name}`, ...converted.warnings, ...extra];
             }
           } catch {
             globalWarnings = [`PDF uploaded: ${file.name}`, "Start the local OMR server with npm run omr:server and configure AUDIVERIS_CMD to enable PDF recognition."];

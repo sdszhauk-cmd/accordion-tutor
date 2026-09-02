@@ -5,3 +5,5 @@ dist/
 .omr/
 debug/
 
+__pycache__/
+Audiveris/

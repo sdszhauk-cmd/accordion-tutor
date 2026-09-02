@@ -165,6 +165,19 @@ accordion-tutor/
 | TypeScript | ^5.8.0 | Type checking |
 | @vitejs/plugin-react | ^5.0.0 | JSX transform for Vite |
 
+### Python (PDF support)
+
+`scripts/extract_chords.py` and `scripts/extract_notes.py` need Python 3 and
+PyMuPDF. The OMR server shells out to them, so install it before uploading PDFs:
+
+```bash
+pip install pymupdf
+```
+
+Set `PYTHON_CMD` if `python` is not the right interpreter on your PATH, and
+`DIRECT_MIN_BAR_FIT` (default `0.7`) to change how strict the note-reading
+confidence gate is.
+
 ### External tools (PDF support only)
 
 | Tool | Purpose |
@@ -324,6 +337,121 @@ box and press Clear to fall back to whatever the score itself contains. The
 override is re-applied whenever the score is re-parsed, including when the
 melody part changes.
 
+### Extracting Chords From a PDF (`scripts/extract_chords.py`)
+
+Engraved PDFs - anything exported from MuseScore, Finale, Sibelius or a
+publisher, as opposed to a scan - keep chord symbols as **ordinary text**, not as
+shapes that have to be recognised. That makes chord extraction a layout problem
+rather than an OMR problem, and it is far more accurate than Audiveris for this
+one job:
+
+```bash
+python scripts/extract_chords.py "zw_scores/Hungarian Dance No. 5.pdf"
+```
+
+It prints a ready-made override string for the **Chords** box above:
+
+```
+Gm | - | D7 | Gm | Cm | Gm | D7 | Gm | - | - | D7 | Gm | Cm Gm | ...
+```
+
+Paste that in, press Apply, and the score plays with correct harmony regardless
+of what the OMR made of the chord symbols. `--json` emits the full structure
+instead.
+
+How it works, and where it can go wrong:
+
+| Step | Method | Failure mode |
+|---|---|---|
+| Staff detection | Horizontal rules grouped into runs of five at the page's modal line spacing | Volta brackets and hairpins are also long horizontal strokes; the spacing test is what excludes them |
+| Measure segmentation | Vertical strokes spanning a full system are barlines; note stems span only part of a staff | On a grand staff a stem can span one staff exactly, so multi-staff systems require the *full system* span |
+| Measure numbers | Engraved numbers at each system's left edge give the expected measure count, and **override** the barline count when they disagree | Absent on some editions (Bella Ciao has none), in which case barlines alone are trusted |
+| Chord layer | Scores often carry two text layers - chord symbols plus smaller fingering or bass-button hints. The larger is chosen | Force the other with `--layer "FontName:size"` |
+| Accidentals | A flat or sharp is frequently a separate music-font glyph, so `B` and `B♭` extract identically. Known accidental glyphs are merged back in | Unrecognised glyphs are **reported, not guessed**, so a wrong chord is never invented |
+| Notation | Letter (`Gm`) and Spanish/solfege (`Solm`, `Dom`, `Lab`) are both understood, auto-detected per file | Force with `--notation letter|solfege` |
+
+Measured on the four scores in `zw_scores/`: measure segmentation agrees with
+every engraved measure number in all three scores that print them, and all 18
+distinct chord symbols extracted map to real Stradella buttons.
+
+**Scanned PDFs are rejected** with a clear message - there is no text layer to
+read, and that genuinely does need OMR.
+
+### Extracting Notes From a PDF (`scripts/extract_notes.py`)
+
+The note-reading counterpart. Same idea, same constraint - engraved PDFs only -
+and it emits MusicXML the app can load directly:
+
+```bash
+python scripts/extract_notes.py "zw_scores/En las colinas de Manchuria. Vals ruso.pdf" \
+    --beats 3 --with-chords --musicxml debug/colinas.musicxml
+```
+
+The trick that makes it work is reading each glyph's **origin** (PyMuPDF's
+`rawdict`) rather than its bounding box. A music font's glyph box is the em box,
+roughly twice the height of a staff, so box centres are useless for pitch;
+origins land exactly on the diatonic grid.
+
+Nothing is hard-coded to a font. Roles are learned per document from position:
+
+| Element | How it is identified |
+|---|---|
+| Clef | Leftmost glyph on the staff. A G clef's origin sits on the G line, an F clef's on the F line - which line it lands on says which clef it is |
+| Key signature | The run of repeated glyphs after the clef. Sharps appear in the order F C G D A E B and flats B E A D G C F, so the *positions* reveal which accidental the glyph is |
+| Accidentals | A glyph that sits immediately left of a notehead at the same pitch. Reliable: 84-85% of instances on the test scores |
+| Noteheads | The three most frequent grid-aligned non-accidental glyphs, each needing many distinct vertical positions - rests sit at fixed heights, noteheads move with the pitch |
+| Rests | The same test read the other way: grid-height glyphs that *don't* move with the pitch |
+| Time signature | The ASCII digits stacked at the staff head - upper is beats, lower is beat type |
+| Beams | Filled polygons made of straight edges. A slur is filled *curves* and the grand-staff brace is tall and narrow, so shape alone separates them. Each beam crossing a stem halves the note |
+| Note values | **Solved**, not measured - see below |
+| Dots | A non-notehead glyph immediately right of a notehead at the same pitch |
+
+Two approaches were tried and **rejected**, which is worth recording so they are
+not retried:
+
+- **Stem adjacency** to find noteheads. Articulations near stems also score
+  100%, while genuine half notes score as low as 39%.
+- **Scale fit** as an arbiter of which glyphs are noteheads. In a key with few
+  accidentals most naturals are already in-scale, so junk scores 100% too - it
+  cheerfully admitted ASCII parentheses as noteheads and injected phantom notes.
+  It survives only as the `--check` diagnostic.
+
+Measured on the two MuseScore scores in `zw_scores/`, **100% of extracted
+pitches fit a single scale**, and that scale agrees with both the engraved key
+signature and the independently extracted chords (E minor for *En las colinas*,
+C minor for *Amur Waves*). The generated MusicXML loads in the app with no
+warnings: 70 measures, 210 beat events, 207 carrying notes.
+
+#### How note values are worked out
+
+A notehead's codepoint is private to the font, so what it is *worth* cannot be
+looked up. Horizontal spacing was tried first and is too blunt: in a waltz the
+median space around a half note is barely wider than around a quarter, and two
+different shapes collapsed onto the same value.
+
+What works is the redundancy in the notation itself - **the durations in a
+measure have to add up to the bar**. With only three notehead shapes there are a
+few dozen candidate assignments, so the right one can simply be searched for:
+the assignment that makes the most measures add up is the one the engraver used.
+On both test scores it independently recovers the same answer, half note = 2
+beats, and the bar check then doubles as the accuracy score:
+
+| Score | Measures adding up from note values |
+|---|---|
+| En las colinas de Manchuria | 128/138 (93%) |
+| Amur Waves | 154/179 (86%) |
+
+Adding rests took those from 85% and 68% - a measure containing a rest can never
+be made to balance from its noteheads alone.
+
+Where a measure still doesn't balance - an unhandled tie, tuplet or second voice
+- that measure alone falls back to the spacing estimate, so a local failure
+stays local. Both generated files load in the app with **no warnings**, and half
+notes now correctly sustain across beats instead of being re-struck.
+
+> **Still not handled:** ties, tuplets, multiple voices per staff, grace notes,
+> and the top staff only. Roughly one measure in ten falls back to spacing.
+
 ### Autoplay / Metronome
 
 1. Set the BPM using the slider or the number input.
@@ -346,10 +474,39 @@ Both toggles are in the autoplay bar and are **off by default**.
 | File type | What happens |
 |---|---|
 | `.musicxml` / `.xml` | Parsed in the browser instantly. **Recommended** — most reliable for notes and chord symbols |
-| `.pdf` | Sent to the local OMR server → converted by Audiveris → parsed as MusicXML. See note below |
+| `.pdf` | Sent to the local server, which **reads engraved PDFs directly** and only falls back to Audiveris OMR when it has to. See note below |
 | `.mxl` | Recognized but not yet supported (export as uncompressed `.musicxml`) |
 
-> **PDF quality note:** PDF conversion relies on Audiveris OMR, which can miss chord symbols, misread notes, or produce incomplete MusicXML — especially on scanned or low-resolution PDFs. For best results, use a proper `.musicxml` file instead. Many scores are available as MusicXML on [MuseScore.com](https://musescore.com) (export as uncompressed MusicXML). Alternatively, open the Audiveris output in [MuseScore](https://musescore.org/) (free), correct any errors, and re-export.
+#### What happens to an uploaded PDF
+
+The server tries the cheap, exact route before the expensive, approximate one:
+
+1. **Chord symbols** are read straight from the PDF's text layer
+   (`scripts/extract_chords.py`). This is not recognition - in an engraved PDF
+   the chords are already text - and it is dramatically better than OMR at the
+   job. They are sent back to the browser, dropped into the **Chords** box and
+   applied automatically when they line up measure-for-measure.
+2. **Notes** are read from the notehead glyphs (`scripts/extract_notes.py`).
+   This is trusted only when the score verifies itself - see the bar check
+   above. Above 70% of measures adding up, Audiveris is **never run at all**:
+   no Java, no OMR, and the upload completes in well under a second instead of
+   tens of seconds.
+3. **Otherwise** Audiveris does the notes as before, while the directly-read
+   chords are still used, because they are reliable even where rhythm is not.
+4. If Audiveris is not installed and the direct reading was weak, the direct
+   reading is used anyway, and the warnings panel says exactly how far it is
+   trusted.
+
+Every step is reported in the warnings panel, so you can always see which route
+a given score took and how much of it was verified.
+
+> **PDF quality note:** direct reading only works on *engraved* (vector) PDFs.
+> A scan has no text layer and no glyphs, so it still needs Audiveris OMR,
+> which can miss chord symbols, misread notes, or produce incomplete MusicXML.
+> For best results use a real `.musicxml` file. Many scores are available as
+> MusicXML on [MuseScore.com](https://musescore.com) (export as uncompressed
+> MusicXML). Alternatively, open the OMR output in
+> [MuseScore](https://musescore.org/) (free), correct any errors, and re-export.
 
 ### Saved Scores
 
@@ -367,6 +524,11 @@ Uploaded scores are automatically saved to IndexedDB in the browser:
 - Right-hand notes come from **one part at a time**. Chord symbols are read from every part, and the melody part is auto-detected (the first part with pitched notes) and can be changed from the part dropdown, but the app does not merge two staves into one line.
 - Extended chords are **approximated, not voiced** — `Cmaj7` plays as `C`, `C9` as `C7`. The Stradella board has no button for them; the Current Beat panel names the substitution.
 - Compressed `.mxl` archives are not decompressed in-browser.
+- `scripts/extract_chords.py` and `scripts/extract_notes.py` work only on
+  engraved (vector) PDFs. Scans have no text layer and still need OMR.
+- `extract_notes.py` reads the **top staff only** (the melody), derives rhythm
+  from spacing rather than from note values, and does not handle ties, rests,
+  tuplets, voices or grace notes. Treat its rhythm as a starting point.
 - **PDF → MusicXML conversion is lossy.** Audiveris OMR frequently misses chord symbols, misreads accidentals, or drops notes — especially on scanned or handwritten scores. Always prefer native `.musicxml` files when available.
 - The counterbass row is displayed on the Stradella grid but is never highlighted automatically.
 - Saved scores are stored in the browser's IndexedDB and do not sync across devices or browsers.
