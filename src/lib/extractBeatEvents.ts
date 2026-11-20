@@ -25,8 +25,9 @@ export const selectStradellaButton = (
 
 export const extractBeatEvents = (
   notesByMeasure: Map<number, RightHandNote[]>,
-  chordsByMeasureBeat: Map<string, ChordSymbol>,
+  chordsByMeasureBeat: Map<string, ChordSymbol | null>,
   beatsPerMeasureByMeasure: Map<number, number>,
+  quartersPerBeat = new Map<number, number>(),
 ): BeatEvent[] => {
   const measureNumbers = Array.from(
     new Set([
@@ -37,19 +38,25 @@ export const extractBeatEvents = (
   ).sort((a, b) => a - b);
 
   const events: BeatEvent[] = [];
-  let currentChord: ChordSymbol | undefined;
+  let currentChord: ChordSymbol | null | undefined;
   let currentAllButtons: LeftHandButton[] = [];
   let currentChordWarnings: string[] = [];
   let nextMeasureStart = 0;
-  const measureStartBeats = new Map<number, number>();
-  const allNotes = Array.from(notesByMeasure.values()).flat();
+  const measureStarts = new Map<number, number>();
 
   measureNumbers.forEach((measureNumber) => {
-    measureStartBeats.set(measureNumber, nextMeasureStart);
-    nextMeasureStart +=
+    measureStarts.set(measureNumber, nextMeasureStart);
+    const beats =
       beatsPerMeasureByMeasure.get(measureNumber) ??
       beatsPerMeasureByMeasure.get(measureNumber - 1) ??
       4;
+    nextMeasureStart += beats * (quartersPerBeat.get(measureNumber) ?? 1);
+  });
+
+  const allNotes = Array.from(notesByMeasure.values()).flat().map(note => {
+    const width = quartersPerBeat.get(note.startMeasure) ?? 1;
+    const start = (measureStarts.get(note.startMeasure) ?? 0) + (note.startBeat - 1) * width;
+    return { note, start, end: start + note.durationBeats * width };
   });
 
   measureNumbers.forEach((measureNumber) => {
@@ -57,19 +64,24 @@ export const extractBeatEvents = (
       beatsPerMeasureByMeasure.get(measureNumber) ??
       beatsPerMeasureByMeasure.get(measureNumber - 1) ??
       4;
-    const measureStartBeat = measureStartBeats.get(measureNumber) ?? 0;
+    const measureStart = measureStarts.get(measureNumber) ?? 0;
+    const durationQuarters = quartersPerBeat.get(measureNumber) ?? 1;
 
     for (let beatNumber = 1; beatNumber <= beatsPerMeasure; beatNumber += 1) {
-      const absoluteBeat = measureStartBeat + beatNumber - 1;
+      const absoluteBeat = measureStart + (beatNumber - 1) * durationQuarters;
       const chordAtBeat = chordsByMeasureBeat.get(`${measureNumber}:${beatNumber}`);
       const warnings: string[] = [];
 
-      if (chordAtBeat) {
+      if (chordAtBeat === null) {
+        currentChord = null;
+        currentAllButtons = [];
+        currentChordWarnings = [];
+      } else if (chordAtBeat) {
         currentChord = chordAtBeat;
         const mapped = mapChordToStradella(chordAtBeat);
         currentAllButtons = mapped.buttons;
         currentChordWarnings = mapped.warnings;
-      } else if (!currentChord) {
+      } else if (currentChord === undefined) {
         warnings.push(
           `Measure ${measureNumber}, Beat ${beatNumber}: No chord symbol detected.`,
         );
@@ -82,30 +94,24 @@ export const extractBeatEvents = (
       );
 
       const activeRightHandNotes = allNotes
-        .filter((note) => {
-          const noteMeasureStart = measureStartBeats.get(note.startMeasure) ?? 0;
-          const noteStart = noteMeasureStart + note.startBeat - 1;
-          return noteStart <= absoluteBeat && noteStart + note.durationBeats > absoluteBeat;
-        })
-        .map((note) => ({
+        .filter(({ start, end }) => start <= absoluteBeat && end > absoluteBeat)
+        .map(({ note, start }) => ({
           ...note,
-          isSustained:
-            (measureStartBeats.get(note.startMeasure) ?? 0) + note.startBeat - 1 <
-            absoluteBeat,
+          isSustained: start < absoluteBeat,
         }));
-      const startingRightHandNotes = allNotes.filter((note) => {
-        const noteMeasureStart = measureStartBeats.get(note.startMeasure) ?? 0;
-        return almostEqual(noteMeasureStart + note.startBeat - 1, absoluteBeat);
-      });
+      const startingRightHandNotes = allNotes
+        .filter(({ start }) => almostEqual(start, absoluteBeat))
+        .map(({ note }) => note);
 
       events.push({
         id: `m${measureNumber}-b${beatNumber}`,
         measureNumber,
         beatNumber,
         beatsPerMeasure,
+        durationQuarters,
         activeRightHandNotes,
         startingRightHandNotes,
-        chordSymbol: currentChord,
+        chordSymbol: currentChord ?? undefined,
         activeLeftHandButtons: selectedButton ? [selectedButton] : [],
         leftHandAction,
         warnings: [...warnings, ...currentChordWarnings],

@@ -12,7 +12,7 @@ const parseNumber = (value: string | undefined | null, fallback: number): number
 
 const qualityFromMusicXmlKind = (kind: string | undefined): ChordQuality => {
   if (!kind) return "major";
-  if (["major", "none"].includes(kind)) return "major";
+  if (kind === "major") return "major";
   if (kind === "minor") return "minor";
   if (kind.includes("seventh") || kind === "dominant") return "seventh";
   if (kind.includes("diminished")) return "diminished";
@@ -63,7 +63,8 @@ const suffixForChordQuality = (quality: ChordQuality): string => {
   return "";
 };
 
-const parseHarmony = (harmony: Element): ChordSymbol | undefined => {
+const parseHarmony = (harmony: Element): ChordSymbol | null | undefined => {
+  if (textOf(harmony, "kind") === "none") return null;
   const rootStep = textOf(harmony, "root-step");
   if (!rootStep) return undefined;
   const rootAlter = parseNumber(textOf(harmony, "root-alter"), 0);
@@ -106,12 +107,15 @@ export const parseMusicXml = (xmlText: string): ParseResult => {
   }
 
   const notesByMeasure = new Map<number, RightHandNote[]>();
-  const chordsByMeasureBeat = new Map<string, ChordSymbol>();
+  const chordsByMeasureBeat = new Map<string, ChordSymbol | null>();
+  const textChords = new Map<string, ChordSymbol>();
   const beatsPerMeasureByMeasure = new Map<number, number>();
+  const quartersPerBeat = new Map<number, number>();
 
   parts.forEach((part, partIndex) => {
     let divisions = 1;
     let currentTimeBeats = 4;
+    let beatType = 4;
 
     Array.from(part.children)
       .filter((child) => child.localName === "measure")
@@ -127,8 +131,12 @@ export const parseMusicXml = (xmlText: string): ParseResult => {
           currentTimeBeats,
         );
         currentTimeBeats = beats;
+        const denominator = parseNumber(textOf(attributes ?? measure, "time > beat-type"), beatType);
+        if (denominator > 0) beatType = denominator;
+        const divisionsPerBeat = divisions * 4 / beatType;
         if (partIndex === 0) {
           beatsPerMeasureByMeasure.set(measureNumber, currentTimeBeats);
+          quartersPerBeat.set(measureNumber, 4 / beatType);
         }
 
         let cursorDivisions = 0;
@@ -147,24 +155,24 @@ export const parseMusicXml = (xmlText: string): ParseResult => {
           }
 
           if (child.localName === "harmony") {
-            const beatNumber = Math.floor(cursorDivisions / divisions) + 1;
+            const beatNumber = Math.floor(cursorDivisions / divisionsPerBeat) + 1;
             const chord = parseHarmony(child);
-            if (chord) chordsByMeasureBeat.set(`${measureNumber}:${beatNumber}`, chord);
+            if (chord !== undefined) chordsByMeasureBeat.set(`${measureNumber}:${beatNumber}`, chord);
             return;
           }
 
           if (child.localName === "direction") {
-            const beatNumber = Math.floor(cursorDivisions / divisions) + 1;
+            const beatNumber = Math.floor(cursorDivisions / divisionsPerBeat) + 1;
             const chord = parseChordFromText(textContentForChordScan(child));
-            if (chord) chordsByMeasureBeat.set(`${measureNumber}:${beatNumber}`, chord);
+            if (chord) textChords.set(`${measureNumber}:${beatNumber}`, chord);
             return;
           }
 
           if (child.localName !== "note") return;
           const lyricChord = parseChordFromText(textContentForChordScan(child));
           if (lyricChord) {
-            const beatNumber = Math.floor(cursorDivisions / divisions) + 1;
-            chordsByMeasureBeat.set(`${measureNumber}:${beatNumber}`, lyricChord);
+            const beatNumber = Math.floor(cursorDivisions / divisionsPerBeat) + 1;
+            textChords.set(`${measureNumber}:${beatNumber}`, lyricChord);
           }
           const isRest = Boolean(child.querySelector("rest"));
           const isChordTone = Boolean(child.querySelector("chord"));
@@ -179,8 +187,8 @@ export const parseMusicXml = (xmlText: string): ParseResult => {
                 id: `m${measureNumber}-n${childIndex}-${pitch.name}`,
                 pitch,
                 startMeasure: measureNumber,
-                startBeat: startDivisions / divisions + 1,
-                durationBeats: Math.max(duration / divisions, 0.25),
+                startBeat: startDivisions / divisionsPerBeat + 1,
+                durationBeats: duration / divisionsPerBeat,
               });
             }
           }
@@ -197,10 +205,15 @@ export const parseMusicXml = (xmlText: string): ParseResult => {
       });
   });
 
+  for (const [beat, chord] of textChords) {
+    if (!chordsByMeasureBeat.has(beat)) chordsByMeasureBeat.set(beat, chord);
+  }
+
   const beatEvents = extractBeatEvents(
     notesByMeasure,
     chordsByMeasureBeat,
     beatsPerMeasureByMeasure,
+    quartersPerBeat,
   );
 
   if (!beatEvents.length) {

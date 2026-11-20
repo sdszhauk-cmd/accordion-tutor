@@ -124,3 +124,28 @@ test("standalone | uploading and stepping updates the instrument diagram", async
   assert.equal(await page.locator("#bass .is-active-bass, #bass .is-active-chord").count(), 0,
     "a button is still highlighted in measure 1 at quarter offset 1");
 });
+
+test("standalone | autoplay schedules the next 6/8 downbeat after three quarters", async () => {
+  await page.locator("#file").setInputFiles(path.join(__dirname, "fixtures/six-eight.musicxml"));
+  await page.getByText(/MusicXML loaded: six-eight.musicxml/).first().waitFor({ state: "attached" });
+  await page.locator("#bpmnum").fill("120");
+  // Observe the metronome's scheduled audio timestamps, independent of frame latency.
+  await page.evaluate(() => {
+    const original = playClick;
+    window.downbeats = [];
+    window.restoreClick = () => { playClick = original; };
+    playClick = (strong, when) => {
+      if (strong) window.downbeats.push(when);
+      original(strong, when);
+    };
+  });
+  try {
+    await page.locator("#playbtn").click();
+    await page.waitForFunction(() => window.downbeats.length >= 2, null, { timeout: 6000 });
+    const gap = await page.evaluate(() => window.downbeats[1] - window.downbeats[0]);
+    assert.ok(Math.abs(gap - 1.5) < 0.000001, "expected 1.5 seconds between downbeats, got " + gap);
+    await page.locator('[data-key="B4"].is-active').waitFor();
+  } finally {
+    await page.evaluate(() => { stopAutoplay(); window.restoreClick(); });
+  }
+});
