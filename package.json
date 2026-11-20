@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test:accuracy": "node --test tests/accuracy.cjs",
     "dev": "vite",
     "build": "tsc && vite build",
     "omr:server": "node server/omr-server.mjs",
@@ -17,5 +18,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "playwright": "^1.62.1"
+  }
 }
