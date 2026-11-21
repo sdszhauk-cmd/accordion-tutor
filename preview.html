@@ -116,7 +116,7 @@
       <div class="autoplay-bar">
         <button id="playbtn">▶ Play</button>
         <div class="bpm-group">
-          <label for="bpmslider">BPM</label>
+          <label for="bpmslider" title="Quarter notes per minute">♩ BPM</label>
           <input id="bpmslider" type="range" min="20" max="200" value="80">
           <input id="bpmnum" type="number" min="20" max="200" value="80">
         </div>
@@ -425,6 +425,7 @@
         if (!osmd || !events.length) return;
         // Map OSMD measure indices to XML measure numbers from events
         const xmlMeasureNums = [...new Set(events.map(e => e.measureNumber))];
+        const beatWidths = new Map(events.map(e => [e.measureNumber, e.durationQuarters ?? 1]));
         // Walk OSMD cursor, collect positions keyed by "measureNum-beatNum"
         const posMap = new Map();
         try {
@@ -441,10 +442,9 @@
             }
             // Local timestamp within this measure (whole notes)
             const localTs = globalTs - measureStartTs;
-            // Convert to 1-based quarter-note beat number
-            const beatNum = Math.floor(localTs * 4 + 0.01) + 1;
             // Map mIdx to the actual XML measure number
             const mNum = mIdx < xmlMeasureNums.length ? xmlMeasureNums[mIdx] : mIdx;
+            const beatNum = Math.floor(localTs * 4 / (beatWidths.get(mNum) ?? 1) + 0.01) + 1;
             const key = mNum + "-" + beatNum;
             if (!posMap.has(key)) {
               posMap.set(key, {
@@ -572,6 +572,8 @@
         "none": null
       };
       function harmonyRaw(harmony) {
+        // null explicitly silences accompaniment. An empty string is an unreadable symbol.
+        if (textOf(harmony, "kind") === "none") return null;
         const step = textOf(harmony, "root-step");
         if (!step) return "";
         const alter = asNumber(textOf(harmony, "root-alter"), 0);
@@ -583,7 +585,6 @@
         const bass = bassStep ? "/" + bassStep + (bassAlter === 1 ? "#" : bassAlter === -1 ? "b" : "") : "";
         const kind = harmony.querySelector("kind");
         const kindValue = (kind?.textContent || "").trim();
-        if (kindValue === "none") return "";
         // Prefer the engraved text, but only when it actually reads as a chord.
         const text = kind?.getAttribute("text")?.replace(/\s+/g, "");
         if (text) {
@@ -648,7 +649,7 @@
         // which outranks a chord spotted in a lyric.
         const chordsByBeat = new Map();
         const setChord = (beat, chord, priority) => {
-          if (!chord) return;
+          if (chord === "") return;
           const previous = chordsByBeat.get(beat);
           if (!previous || previous.priority < priority) chordsByBeat.set(beat, { chord, priority });
         };
@@ -656,20 +657,24 @@
         parts.forEach((part, partIndex) => {
           let divisions = 1;
           let beatsPerMeasure = 4;
+          let beatType = 4;
           let measureStart = 0;
           const partMeasures = [];
           Array.from(part.children).filter(child => child.localName === "measure").forEach((measure, measureIndex) => {
             const attributes = measure.querySelector("attributes");
             divisions = asNumber(textOf(attributes, "divisions"), divisions);
             beatsPerMeasure = asNumber(textOf(attributes, "time > beats"), beatsPerMeasure);
+            const denominator = asNumber(textOf(attributes, "time > beat-type"), beatType);
+            if (denominator > 0) beatType = denominator;
+            const durationQuarters = 4 / beatType;
             const measureNumber = asNumber(measure.getAttribute("number"), measureIndex + 1);
-            partMeasures.push({ measureNumber, start: measureStart, beats: beatsPerMeasure });
+            partMeasures.push({ measureNumber, start: measureStart, beats: beatsPerMeasure, durationQuarters });
             let cursor = 0;
             let lastNoteStart = 0;
             Array.from(measure.children).forEach((child, childIndex) => {
               if (child.localName === "backup") { cursor -= asNumber(textOf(child, "duration"), 0); return; }
               if (child.localName === "forward") { cursor += asNumber(textOf(child, "duration"), 0); return; }
-              const beatKey = measureStart + Math.floor(cursor / divisions);
+              const beatKey = measureStart + Math.floor(cursor / (divisions * durationQuarters)) * durationQuarters;
               // Chord symbols come from every part - lead sheets often park them
               // on a separate chord or guitar staff.
               if (child.localName === "harmony") { setChord(beatKey, harmonyRaw(child), 3); return; }
@@ -681,14 +686,14 @@
               const start = isChordTone ? lastNoteStart : cursor;
               if (!child.querySelector("rest") && partIndex === melodyIndex) {
                 const name = pitchName(child.querySelector("pitch"));
-                if (name) notes.push({ id: `m${measureNumber}-n${childIndex}-${name}`, pitch: pitch(name), start: measureStart + start / divisions, durationBeats: Math.max(duration / divisions, 0.25) });
+                if (name) notes.push({ id: `m${measureNumber}-n${childIndex}-${name}`, pitch: pitch(name), start: measureStart + start / divisions, durationQuarters: duration / divisions, durationBeats: duration / (divisions * durationQuarters) });
               }
               if (!isChordTone) {
                 lastNoteStart = start;
                 cursor += duration;
               }
             });
-            measureStart += beatsPerMeasure;
+            measureStart += beatsPerMeasure * durationQuarters;
           });
           measuresByPart.push(partMeasures);
         });
@@ -700,14 +705,14 @@
         let currentChord = "";
         measures.forEach(measure => {
           for (let beat = 0; beat < measure.beats; beat++) {
-            const beatStart = measure.start + beat;
+            const beatStart = measure.start + beat * measure.durationQuarters;
             if (chordsByBeat.has(beatStart)) currentChord = chordsByBeat.get(beatStart).chord;
             const beatNumber = beat + 1;
             if (currentChord && isApproxChord(currentChord)) approximations.set(currentChord, stradellaLabel(currentChord));
             // Group all notes starting within this beat into onset buckets
             const onsetMap = new Map();
             notes.forEach(n => {
-              const posInBeat = n.start - beatStart;
+              const posInBeat = (n.start - beatStart) / measure.durationQuarters;
               if (posInBeat >= -0.001 && posInBeat < 1 - 0.001) {
                 const key = Math.round(posInBeat * 1000);
                 if (!onsetMap.has(key)) onsetMap.set(key, { posInBeat, notes: [] });
@@ -715,15 +720,15 @@
               }
             });
             const noteOnsets = Array.from(onsetMap.values()).sort((a, b) => a.posInBeat - b.posInBeat);
-            const activeNotes = notes.filter(n => n.start <= beatStart + 0.001 && n.start + n.durationBeats > beatStart).map(n => ({ ...n, isSustained: n.start < beatStart - 0.001 }));
+            const activeNotes = notes.filter(n => n.start <= beatStart + 0.001 && n.start + n.durationQuarters > beatStart).map(n => ({ ...n, isSustained: n.start < beatStart - 0.001 }));
             const startingNotes = notes.filter(n => Math.abs(n.start - beatStart) < 0.001);
-            const beatWarnings = currentChord ? [] : [`Measure ${measure.measureNumber}, Beat ${beatNumber}: No chord symbol detected.`];
+            const beatWarnings = currentChord === "" ? [`Measure ${measure.measureNumber}, Beat ${beatNumber}: No chord symbol detected.`] : [];
             const { buttons: lhButtons, action: lhAction } = currentChord ? selectChordButton(currentChord, beatNumber, measure.beats) : { buttons: [], action: "none" };
-            parsedEvents.push({ id: `m${measure.measureNumber}-b${beatNumber}`, measureNumber: measure.measureNumber, beatNumber, beatsPerMeasure: measure.beats, noteOnsets, activeRightHandNotes: activeNotes, startingRightHandNotes: startingNotes, chordSymbol: currentChord ? { raw: currentChord } : undefined, activeLeftHandButtons: lhButtons, leftHandAction: lhAction, warnings: beatWarnings.concat(chordWarnings(currentChord)) });
+            parsedEvents.push({ id: `m${measure.measureNumber}-b${beatNumber}`, measureNumber: measure.measureNumber, beatNumber, beatsPerMeasure: measure.beats, durationQuarters: measure.durationQuarters, noteOnsets, activeRightHandNotes: activeNotes, startingRightHandNotes: startingNotes, chordSymbol: currentChord ? { raw: currentChord } : undefined, activeLeftHandButtons: lhButtons, leftHandAction: lhAction, warnings: beatWarnings.concat(chordWarnings(currentChord)) });
           }
         });
         if (!parsedEvents.length) warnings.push("No beat events could be extracted from this MusicXML file.");
-        else if (!parsedEvents.some(e => e.chordSymbol)) warnings.push("No chord symbols found in this score. Type the progression into the Chords box to supply them by hand.");
+        else if (!chordsByBeat.size) warnings.push("No chord symbols found in this score. Type the progression into the Chords box to supply them by hand.");
         if (approximations.size) warnings.push("Simplified for the Stradella bass: " + [...approximations].map(([raw, played]) => `${raw} \u2192 ${played}`).join(", ") + ".");
         if (partInfo.length > 1) warnings.push(`${partInfo.length} parts found; reading notes from "${partInfo[melodyIndex].name}".`);
         if (DEBUG) {
@@ -871,7 +876,7 @@
           // The floor only guards against a zero-length timer. It must stay well
           // under the real sub-beat gap, otherwise fast passages (four
           // sixteenths at 200 BPM) overrun the beat they belong to.
-          const delay = Math.max(16, gap * (60000 / bpm));
+          const delay = Math.max(16, gap * secondsPerBeat(beat) * 1000);
           noteAnimTimer = setTimeout(() => animateOnsets(beat, idx + 1), delay);
         }
       }
@@ -925,7 +930,7 @@
       let nextBeatTime = 0;
       let beatQueue = [];
 
-      const secondsPerBeat = () => 60 / bpm;
+      const secondsPerBeat = beat => (60 / bpm) * (beat.durationQuarters ?? 1);
 
       function getAudioCtx() {
         if (!audioCtx) {
@@ -961,7 +966,7 @@
         playClick(beat.beatNumber === 1, when);
         if (bassSound) playBassButtonSound(beat, when);
         if (noteSound) {
-          const spb = secondsPerBeat();
+          const spb = secondsPerBeat(beat);
           (beat.noteOnsets || []).forEach((onset, i) => {
             playNoteChord(i === 0 ? beat.activeRightHandNotes : onset.notes, when + onset.posInBeat * spb);
           });
@@ -980,7 +985,7 @@
           beatQueue.push({ index: nextBeatIndex, time: nextBeatTime });
           // Reading the tempo here means a BPM change takes hold within one
           // lookahead window, with no re-anchoring required.
-          nextBeatTime += secondsPerBeat();
+          nextBeatTime += secondsPerBeat(events[nextBeatIndex]);
           nextBeatIndex++;
         }
       }

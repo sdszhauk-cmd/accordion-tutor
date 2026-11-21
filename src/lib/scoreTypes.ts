@@ -51,6 +51,8 @@ export type BeatEvent = {
   measureNumber: number;
   beatNumber: number;
   beatsPerMeasure: number;
+  /** Quarter notes per displayed beat. Defaults to one for the built-in sample. */
+  durationQuarters?: number;
   activeRightHandNotes: RightHandNote[];
   startingRightHandNotes: RightHandNote[];
   chordSymbol?: ChordSymbol;
